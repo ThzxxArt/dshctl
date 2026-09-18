@@ -28,8 +28,8 @@ assert_file_exists "$PROJECT_ROOT/docs/troubleshooting.md" "排障手册存在"
 assert_file_exists "$PROJECT_ROOT/docs/development.md" "开发指南存在"
 
 assert_command "CHANGELOG 包含当前版本小节" grep -qF "## [$script_version]" "$PROJECT_ROOT/CHANGELOG.md"
-assert_command "README 徽章指向仓库地址" grep -qF "github.com/thzxx/dshctl" "$PROJECT_ROOT/README.md"
-assert_command "脚本内包含项目主页" grep -qF "github.com/thzxx/dshctl" "$DSHCTL"
+assert_command "README 徽章指向仓库地址" grep -qF "github.com/ThzxxArt/dshctl" "$PROJECT_ROOT/README.md"
+assert_command "脚本内包含项目主页" grep -qF "github.com/ThzxxArt/dshctl" "$DSHCTL"
 
 run_dshctl --version
 assert_rc 0 "--version 在隔离环境可用"

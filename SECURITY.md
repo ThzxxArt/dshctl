@@ -11,7 +11,7 @@
 
 请**不要**通过公开 Issue 报告安全漏洞。请使用 GitHub 的私密漏洞报告：
 
-👉 <https://github.com/thzxx/dshctl/security/advisories/new>
+👉 <https://github.com/ThzxxArt/dshctl/security/advisories/new>
 
 报告请尽量包含：
 

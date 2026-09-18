@@ -2,8 +2,8 @@
 
 > An all-in-one installer / operator / cleaner script for DeepSeek Harness (dsh)
 
-[![CI](https://github.com/thzxx/dshctl/actions/workflows/ci.yml/badge.svg)](https://github.com/thzxx/dshctl/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/thzxx/dshctl?display_name=tag)](https://github.com/thzxx/dshctl/releases/latest)
+[![CI](https://github.com/ThzxxArt/dshctl/actions/workflows/ci.yml/badge.svg)](https://github.com/ThzxxArt/dshctl/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/thzxx/dshctl?display_name=tag)](https://github.com/ThzxxArt/dshctl/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20WSL-blue)](#requirements)
 
@@ -46,7 +46,7 @@ Node.js 22.19+ / 24+ is installed automatically when missing. About 5 GB free di
 ## Quick start
 
 ```bash
-git clone https://github.com/thzxx/dshctl.git
+git clone https://github.com/ThzxxArt/dshctl.git
 cd dshctl
 bash dshctl.sh --install -y --api-key sk-xxxx
 bash dshctl.sh --register      # optional: install the dshctl command globally

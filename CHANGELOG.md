@@ -43,5 +43,5 @@
 - 增加 ShellCheck 静态检查、CLI 测试套件与 GitHub Actions CI；发布工作流在打 tag 时
   自动校验版本一致性并创建 Release。
 
-[Unreleased]: https://github.com/thzxx/dshctl/compare/v1.4.0...HEAD
-[1.4.0]: https://github.com/thzxx/dshctl/releases/tag/v1.4.0
+[Unreleased]: https://github.com/ThzxxArt/dshctl/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.0

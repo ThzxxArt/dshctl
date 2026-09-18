@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/deepseek-ai/deepseek-harness/issues
     about: dsh 自身的 Bug 与功能请求请提交到上游仓库（本项目为社区安装/运维工具）
   - name: 安全漏洞（私密报告）
-    url: https://github.com/thzxx/dshctl/security/advisories/new
+    url: https://github.com/ThzxxArt/dshctl/security/advisories/new
     about: 请勿在公开 Issue 中披露安全问题，详见 SECURITY.md

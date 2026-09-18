@@ -30,7 +30,7 @@ run_dshctl --version
 assert_rc 0 "--version 退出码为 0"
 script_version="$(sed -n 's/^DSHCTL_VERSION="\(.*\)"$/\1/p' "$DSHCTL")"
 assert_stdout_contains "dshctl.sh v$script_version" "--version 输出版本号"
-assert_stdout_contains "github.com/thzxx/dshctl" "--version 输出项目主页"
+assert_stdout_contains "github.com/ThzxxArt/dshctl" "--version 输出项目主页"
 assert_stdout_contains "已装 dsh" "--version 输出 dsh 安装状态"
 
 run_dshctl -V

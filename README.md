@@ -2,8 +2,8 @@
 
 > DeepSeek Harness（dsh）安装 · 运维 · 清理 一体化脚本
 
-[![CI](https://github.com/thzxx/dshctl/actions/workflows/ci.yml/badge.svg)](https://github.com/thzxx/dshctl/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/thzxx/dshctl?display_name=tag)](https://github.com/thzxx/dshctl/releases/latest)
+[![CI](https://github.com/ThzxxArt/dshctl/actions/workflows/ci.yml/badge.svg)](https://github.com/ThzxxArt/dshctl/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/thzxx/dshctl?display_name=tag)](https://github.com/ThzxxArt/dshctl/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20WSL-blue)](#环境要求)
 
@@ -65,12 +65,12 @@ dshctl 把这些收敛为一条命令，并且刻意做成**可反复执行**的
 
 ```bash
 # 方式一：克隆仓库（推荐，便于后续更新脚本）
-git clone https://github.com/thzxx/dshctl.git
+git clone https://github.com/ThzxxArt/dshctl.git
 cd dshctl
 bash dshctl.sh --install -y --api-key sk-xxxx
 
 # 方式二：只下载脚本
-curl -fsSL -o dshctl.sh https://raw.githubusercontent.com/thzxx/dshctl/main/dshctl.sh
+curl -fsSL -o dshctl.sh https://raw.githubusercontent.com/ThzxxArt/dshctl/main/dshctl.sh
 bash dshctl.sh --install -y --api-key sk-xxxx
 ```
 

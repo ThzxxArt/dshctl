@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #  SPDX-License-Identifier: MIT
-#  项目主页: https://github.com/thzxx/dshctl
+#  项目主页: https://github.com/ThzxxArt/dshctl
 # =============================================================================
 #  dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
 # -----------------------------------------------------------------------------
@@ -313,7 +313,7 @@ EOF
 
 show_version() {
   printf 'dshctl.sh v%s（DeepSeek Harness 安装 · 运维 · 清理）\n' "$DSHCTL_VERSION"
-  printf '项目主页: https://github.com/thzxx/dshctl\n'
+  printf '项目主页: https://github.com/ThzxxArt/dshctl\n'
   printf '脚本路径: %s\n' "$(script_self_path "$0" 2>/dev/null || printf '%s' "$0")"
   local ver=""
   ver="$(installed_dsh_version || true)"
@@ -521,7 +521,7 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
   git config --global --unset http.https://github.com/.proxy
 
 项目主页:
-  https://github.com/thzxx/dshctl
+  https://github.com/ThzxxArt/dshctl
 EOF
 }
 
