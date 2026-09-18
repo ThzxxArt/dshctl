@@ -30,6 +30,10 @@ setup() {
   }
   FAKE_BIN="$TEST_HOME/fakebin"
   mkdir -p "$FAKE_BIN"
+  # 可选：DSH_TEST_BASH 指定用于运行 dshctl.sh 的 bash 二进制（用于本地验证 Bash 3.2 兼容性）
+  if [ -n "${DSH_TEST_BASH:-}" ]; then
+    ln -s "$DSH_TEST_BASH" "$FAKE_BIN/bash"
+  fi
   make_stub "$FAKE_BIN/node" '#!/usr/bin/env bash
 echo "v24.19.0"'
   make_stub "$FAKE_BIN/pnpm" '#!/usr/bin/env bash

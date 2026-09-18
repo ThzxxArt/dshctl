@@ -562,7 +562,7 @@ validate_args() {
   local -a model_acts=()
   local -a data_acts=()
   local -a backup_acts=()
-  for opt in "${SEEN_OPTS[@]}"; do
+  for opt in ${SEEN_OPTS[@]+"${SEEN_OPTS[@]}"}; do
     case "$opt" in
       --start|--stop|--restart|--logs) svc_count=$((svc_count + 1)) ;;
       --plugin-list)   plugin_acts+=("list") ;;
@@ -589,28 +589,28 @@ validate_args() {
   [ "$svc_count" -gt 1 ] && die "操作冲突：--start / --stop / --restart / --logs 只能选择一个"
   if [ "${#plugin_acts[@]}" -gt 0 ]; then
     local pa plugin_first="${plugin_acts[0]}" plugin_conflict=0
-    for pa in "${plugin_acts[@]}"; do
+    for pa in ${plugin_acts[@]+"${plugin_acts[@]}"}; do
       [ "$pa" = "$plugin_first" ] || plugin_conflict=1
     done
     [ "$plugin_conflict" -eq 1 ] && die "操作冲突：插件管理命令只能选择一个（--plugin-* 系列，详见 --help）"
   fi
   if [ "${#model_acts[@]}" -gt 0 ]; then
     local ma model_first="${model_acts[0]}" model_conflict=0
-    for ma in "${model_acts[@]}"; do
+    for ma in ${model_acts[@]+"${model_acts[@]}"}; do
       [ "$ma" = "$model_first" ] || model_conflict=1
     done
     [ "$model_conflict" -eq 1 ] && die "操作冲突：模型维护命令只能选择一个（--model-show / --model-check / --model-fix / --model-set-base）"
   fi
   if [ "${#data_acts[@]}" -gt 0 ]; then
     local da data_first="${data_acts[0]}" data_conflict=0
-    for da in "${data_acts[@]}"; do
+    for da in ${data_acts[@]+"${data_acts[@]}"}; do
       [ "$da" = "$data_first" ] || data_conflict=1
     done
     [ "$data_conflict" -eq 1 ] && die "操作冲突：数据维护命令只能选择一个（--data-backup / --data-restore / --data-archive-sessions / --data-prune）"
   fi
   if [ "${#backup_acts[@]}" -gt 0 ]; then
     local ba backup_first="${backup_acts[0]}" backup_conflict=0
-    for ba in "${backup_acts[@]}"; do
+    for ba in ${backup_acts[@]+"${backup_acts[@]}"}; do
       [ "$ba" = "$backup_first" ] || backup_conflict=1
     done
     [ "$backup_conflict" -eq 1 ] && die "操作冲突：备份管理命令只能选择一个（--backups-list / --backups-prune）"
@@ -629,7 +629,7 @@ validate_args() {
   [ "$DO_URL" -eq 1 ] && modes+=("url")
   [ "$DO_UPGRADE_CHECK" -eq 1 ] && modes+=("upgrade-check")
   if [ "${#modes[@]}" -gt 1 ]; then
-    die "操作冲突：${modes[*]} 只能选择一个（详见 --help）"
+    die "操作冲突：${modes[*]+"${modes[*]}"} 只能选择一个（详见 --help）"
   fi
   MODE="${modes[0]:-}"
   if [ -z "$MODE" ] && [ "$DRY_RUN" -eq 1 ]; then
@@ -637,7 +637,7 @@ validate_args() {
   fi
 
   # 2) 模式-参数匹配（无操作时：只检查安装专属参数，其余交给帮助提示）
-  for opt in "${SEEN_OPTS[@]}"; do
+  for opt in ${SEEN_OPTS[@]+"${SEEN_OPTS[@]}"}; do
     case "$opt" in
       -y|--yes|--log|--log-max-mb|-h|--help|-V|--version) ;;
       --install|--status|--doctor|--start|--stop|--restart|--logs|--uninstall|--purge|--register|--unregister) ;;
@@ -662,7 +662,7 @@ validate_args() {
     die "选项 --last 只能与 --logs 一起使用（详见 --help）"
   fi
   if [ "$DO_ROLLBACK" -eq 1 ]; then
-    case " ${SEEN_OPTS[*]} " in
+    case " ${SEEN_OPTS[*]+"${SEEN_OPTS[*]}"} " in
       *" --ref "*) die "选项 --rollback 与 --ref 不能同时使用（回退目标请在 --rollback 后直接给出）" ;;
     esac
   fi
@@ -692,7 +692,7 @@ validate_args() {
   fi
   if [ "${#TRUSTED_HOSTS[@]}" -gt 0 ]; then
     local th
-    for th in "${TRUSTED_HOSTS[@]}"; do
+    for th in ${TRUSTED_HOSTS[@]+"${TRUSTED_HOSTS[@]}"}; do
       case "$th" in
         '') die "--trusted-host 不能为空" ;;
         *[[:space:]\'\"]*) die "--trusted-host 不能包含空白或引号: $th" ;;
@@ -708,7 +708,7 @@ validate_args() {
       ;;
     *) die "--profile 名称需以字母或数字开头: $PLUGIN_PROFILE" ;;
   esac
-  for opt in "${SEEN_OPTS[@]}"; do
+  for opt in ${SEEN_OPTS[@]+"${SEEN_OPTS[@]}"}; do
     if [ "$opt" = "--proxy-scope" ]; then
       case "$DSH_PROXY_SCOPE" in
         global|local|system|none) ;;
@@ -1492,14 +1492,14 @@ ensure_repo() {
   local clone_args=(--branch "$DSH_REF")
   [ "$SHALLOW" -eq 1 ] && clone_args+=(--depth 1)
   # tag/commit 无法用 --branch，失败后回退为完整克隆 + checkout
-  if git clone "${clone_args[@]}" "$repo_url" "$DSH_DIR" 2>/dev/null; then
+  if git clone ${clone_args[@]+"${clone_args[@]}"} "$repo_url" "$DSH_DIR" 2>/dev/null; then
     ok "已克隆（ref=${DSH_REF}）到 $DSH_DIR"
   else
     warn "按 ref 克隆失败，回退为默认克隆 + checkout ..."
     rm -rf "$DSH_DIR"
     local plain=(--depth 1)
     [ "$SHALLOW" -eq 0 ] && plain=()
-    git clone "${plain[@]}" "$repo_url" "$DSH_DIR"
+    git clone ${plain[@]+"${plain[@]}"} "$repo_url" "$DSH_DIR"
     git -C "$DSH_DIR" checkout "$DSH_REF" || die "无法切换到 ref: $DSH_REF"
   fi
   REPO_HEAD="$(repo_head)"
@@ -1702,7 +1702,7 @@ install_launcher() {
   local th_flags=""
   if [ "${#TRUSTED_HOSTS[@]}" -gt 0 ]; then
     local t
-    for t in "${TRUSTED_HOSTS[@]}"; do
+    for t in ${TRUSTED_HOSTS[@]+"${TRUSTED_HOSTS[@]}"}; do
       th_flags="$th_flags --trusted-host \"$t\""
     done
   fi
@@ -1868,7 +1868,7 @@ do_uninstall() {
     [ -e "$DSH_DIR" ] && purge_items+=("源码目录     : $DSH_DIR")
     [ -e "$dsh_home" ] && purge_items+=("运行数据     : ${dsh_home}（profiles / storages / 凭据 / 设置）")
     local lf
-    for lf in "${purge_logs[@]}"; do
+    for lf in ${purge_logs[@]+"${purge_logs[@]}"}; do
       [ -f "$lf" ] && purge_items+=("安装日志     : $lf")
       [ -f "${lf}.1" ] && purge_items+=("日志归档     : ${lf}.1")
     done
@@ -1890,7 +1890,7 @@ do_uninstall() {
     else
       info "以下内容将被处理："
       local item
-      for item in "${purge_items[@]}"; do
+      for item in ${purge_items[@]+"${purge_items[@]}"}; do
         printf '   - %s\n' "$item"
       done
     fi
@@ -1978,7 +1978,7 @@ do_uninstall() {
         || warn "无法移除 git 系统级代理配置（通常需要 root），请手动处理。"
     fi
     local lf2
-    for lf2 in "${purge_logs[@]}"; do
+    for lf2 in ${purge_logs[@]+"${purge_logs[@]}"}; do
       rm -f -- "$lf2" "${lf2}.1" 2>/dev/null || true
     done
     # 安装锁文件：flock 随进程退出自动释放，这里清掉文件本身（含旧版锁）
@@ -2359,9 +2359,9 @@ service_ctl_pid() {
         local -a th_args=()
         if [ "${#TRUSTED_HOSTS[@]}" -gt 0 ]; then
           local t
-          for t in "${TRUSTED_HOSTS[@]}"; do th_args+=(--trusted-host "$t"); done
+          for t in ${TRUSTED_HOSTS[@]+"${TRUSTED_HOSTS[@]}"}; do th_args+=(--trusted-host "$t"); done
         fi
-        nohup env DSH_PORT="$DSH_PORT" "$HOME/.local/bin/dsh" web --no-open "${th_args[@]}" >>"$log_file" 2>&1 < /dev/null 3>&- 4>&- 9>&- &
+        nohup env DSH_PORT="$DSH_PORT" "$HOME/.local/bin/dsh" web --no-open ${th_args[@]+"${th_args[@]}"} >>"$log_file" 2>&1 < /dev/null 3>&- 4>&- 9>&- &
       else
         nohup "$HOME/.local/bin/dsh" --profile "$sp" >>"$log_file" 2>&1 < /dev/null 3>&- 4>&- 9>&- &
       fi
@@ -2967,12 +2967,12 @@ do_plugin_action() {
   local s
   case "$PLUGIN_ACTION" in
     add|remove)
-      for s in "${PLUGIN_SPECS[@]}"; do
+      for s in ${PLUGIN_SPECS[@]+"${PLUGIN_SPECS[@]}"}; do
         specs+=("$(resolve_plugin_spec "$s")")
       done
       ;;
     update|why)
-      specs=("${PLUGIN_SPECS[@]}")
+      specs=(${PLUGIN_SPECS[@]+"${PLUGIN_SPECS[@]}"})
       ;;
   esac
   if [ "$PLUGIN_ACTION" = "why" ] && [ "${#specs[@]}" -ne 1 ]; then
@@ -2982,25 +2982,25 @@ do_plugin_action() {
   case "$PLUGIN_ACTION" in
     add)
       warn "安装插件 = 引入可执行代码，请确认来源可信。"
-      info "安装插件: ${specs[*]}"
+      info "安装插件: ${specs[*]+"${specs[*]}"}"
       ;;
-    remove) info "卸载插件: ${specs[*]}" ;;
+    remove) info "卸载插件: ${specs[*]+"${specs[*]}"}" ;;
     update)
-      if [ "${#specs[@]}" -gt 0 ]; then info "更新插件: ${specs[*]}"; else info "更新全部插件..."; fi
+      if [ "${#specs[@]}" -gt 0 ]; then info "更新插件: ${specs[*]+"${specs[*]}"}"; else info "更新全部插件..."; fi
       ;;
     why)    info "依赖溯源: ${specs[0]}" ;;
     repair) info "重建 profile 锁文件（pnpm clean --lockfile + pnpm install）..." ;;
   esac
 
   if [ "$PLUGIN_ACTION" = "remove" ]; then
-    plugin_precheck_remove "${PLUGIN_SPECS[@]}"
+    plugin_precheck_remove ${PLUGIN_SPECS[@]+"${PLUGIN_SPECS[@]}"}
   fi
 
   local rc=0
   case "$PLUGIN_ACTION" in
-    add)    plugin_run "$profile" add "${specs[@]}" || rc=$? ;;
-    remove) plugin_run "$profile" remove "${specs[@]}" || rc=$? ;;
-    update) plugin_run "$profile" update "${specs[@]}" || rc=$? ;;
+    add)    plugin_run "$profile" add ${specs[@]+"${specs[@]}"} || rc=$? ;;
+    remove) plugin_run "$profile" remove ${specs[@]+"${specs[@]}"} || rc=$? ;;
+    update) plugin_run "$profile" update ${specs[@]+"${specs[@]}"} || rc=$? ;;
     why)    plugin_run "$profile" why "${specs[0]}" || rc=$? ;;
     repair)
       plugin_run "$profile" clean --lockfile || rc=$?
@@ -3373,10 +3373,10 @@ do_model_fix() {
 
   step "Base URL 配置修复"
   local item
-  for item in "${fix_files[@]}"; do
+  for item in ${fix_files[@]+"${fix_files[@]}"}; do
     printf '  将修复   : %s（当前值: %s；注释后 dsh 可正常启动）\n' "${item%%|*}" "${item##*|}"
   done
-  for item in "${manual[@]}"; do
+  for item in ${manual[@]+"${manual[@]}"}; do
     printf '  需手动   : %s（当前值: %s）\n' "${item%%|*}" "${item##*|}"
   done
 
@@ -3391,7 +3391,7 @@ do_model_fix() {
     fi
     local ts
     ts="$(date +%Y%m%d-%H%M%S)"
-    for item in "${fix_files[@]}"; do
+    for item in ${fix_files[@]+"${fix_files[@]}"}; do
       f="${item%%|*}"; val="${item##*|}"
       cp -a -- "$f" "$f.bak.$ts" 2>/dev/null || die "备份失败: $f"
       env_comment_baseurl "$f" || die "修改失败: $f"
@@ -3411,7 +3411,7 @@ do_model_fix() {
   if [ "${#manual[@]}" -gt 0 ]; then
     warn "以下位置无法自动修改，请手动处理："
     local settings_hit=0 env_hit=0 patch_hit=0
-    for item in "${manual[@]}"; do
+    for item in ${manual[@]+"${manual[@]}"}; do
       warn "  · ${item%%|*}（当前值: ${item##*|}）"
       case "${item%%|*}" in
         设置文件*) settings_hit=1 ;;
@@ -3832,7 +3832,7 @@ do_backups_prune() {
     info "没有超出保留数量的备份。"
     return 0
   fi
-  for f in "${to_delete[@]}"; do
+  for f in ${to_delete[@]+"${to_delete[@]}"}; do
     printf '  删除: %s\n' "$f"
   done
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -3843,7 +3843,7 @@ do_backups_prune() {
     die "已取消。"
   fi
   local deleted=0
-  for f in "${to_delete[@]}"; do
+  for f in ${to_delete[@]+"${to_delete[@]}"}; do
     if rm -f -- "$f" 2>/dev/null; then deleted=$((deleted + 1)); fi
   done
   ok "已删除 $deleted 个旧备份。"

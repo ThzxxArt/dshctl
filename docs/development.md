@@ -82,9 +82,18 @@ bash tests/run.sh          # 或用 make test
 ## 兼容性约束
 
 - **Bash 3.2**（macOS 自带）：不使用关联数组、`mapfile`、`${var,,}` 等 Bash 4+ 特性；
+  另需注意两个 Bash 3.2 陷阱：
+  - `$var` 后紧跟多字节字符时必须写 `${var}`（否则变量名会被多字节字节污染）；
+  - 空数组展开必须写 `${arr[@]+"${arr[@]}"}`（直接 `"${arr[@]}"` 在 `set -u` 下报 unbound variable）；
 - **GNU/BSD 差异**：`date`、`sed -i`、`grep -E` 等均有兜底或 BSD 分支；
 - **无 jq**：解析 JSON 使用 `node -e`，且对 node 缺失场景保持降级可用；
 - **外部命令缺失**：`xz` `flock` `ss`/`lsof`/`fuser` 均有降级路径。
+
+本地验证 Bash 3.2 兼容性（可选）：自行编译 Bash 3.2 后，用 `DSH_TEST_BASH` 指定二进制运行测试：
+
+```bash
+DSH_TEST_BASH=/path/to/bash-3.2/bash PATH="/path/to/bash-3.2:$PATH" bash tests/run.sh
+```
 
 ## 发布流程
 
