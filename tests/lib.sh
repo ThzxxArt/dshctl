@@ -76,9 +76,9 @@ _fail() { TOTAL=$((TOTAL + 1)); FAILED=$((FAILED + 1)); printf 'not ok %d - %s\n
 assert_rc() {
   local expected="$1" desc="${2:-退出码}"
   if [ "$LAST_RC" -eq "$expected" ]; then
-    _pass "$desc（rc=$LAST_RC）"
+    _pass "${desc}（rc=${LAST_RC}）"
   else
-    _fail "$desc：期望 rc=$expected，实际 rc=$LAST_RC"
+    _fail "${desc}：期望 rc=${expected}，实际 rc=$LAST_RC"
   fi
 }
 
@@ -88,7 +88,7 @@ assert_stdout_contains() {
   if [ -f "$OUT_FILE" ] && grep -qF -- "$pattern" "$OUT_FILE"; then
     _pass "$desc"
   else
-    _fail "$desc（stdout 中未找到）"
+    _fail "${desc}（stdout 中未找到）"
   fi
 }
 
@@ -96,7 +96,7 @@ assert_stdout_not_contains() {
   local pattern="$1"
   local desc="${2:-stdout 不包含 [$pattern]}"
   if [ -f "$OUT_FILE" ] && grep -qF -- "$pattern" "$OUT_FILE"; then
-    _fail "$desc（stdout 中意外出现）"
+    _fail "${desc}（stdout 中意外出现）"
   else
     _pass "$desc"
   fi
@@ -112,20 +112,20 @@ assert_output_contains() {
     || { [ -f "$ERR_FILE" ] && grep -qF -- "$pattern" "$ERR_FILE"; }; then
     _pass "$desc"
   else
-    _fail "$desc（stdout/stderr 中均未找到）"
+    _fail "${desc}（stdout/stderr 中均未找到）"
   fi
 }
 
 assert_file_exists() {
   local path="$1"
   local desc="${2:-文件存在: $path}"
-  if [ -e "$path" ]; then _pass "$desc"; else _fail "$desc（不存在）"; fi
+  if [ -e "$path" ]; then _pass "$desc"; else _fail "${desc}（不存在）"; fi
 }
 
 assert_file_absent() {
   local path="$1"
   local desc="${2:-文件不存在: $path}"
-  if [ -e "$path" ]; then _fail "$desc（意外存在）"; else _pass "$desc"; fi
+  if [ -e "$path" ]; then _fail "${desc}（意外存在）"; else _pass "$desc"; fi
 }
 
 assert_symlink_to() {
@@ -134,7 +134,7 @@ assert_symlink_to() {
   if [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; then
     _pass "$desc"
   else
-    _fail "$desc（当前: $(readlink "$link" 2>/dev/null || echo '非软链或不存在')）"
+    _fail "${desc}（当前: $(readlink "$link" 2>/dev/null || echo '非软链或不存在')）"
   fi
 }
 
@@ -143,7 +143,7 @@ assert_equals() {
   if [ "$actual" = "$expected" ]; then
     _pass "$desc"
   else
-    _fail "$desc：期望 [$expected]，实际 [$actual]"
+    _fail "${desc}：期望 [$expected]，实际 [$actual]"
   fi
 }
 

@@ -181,9 +181,9 @@ cleanup() {
   trap - ERR
   if [ "$code" -ne 0 ] && [ "${QUIET_EXIT:-0}" -ne 1 ]; then
     if [ -n "${FAIL_LINE:-}" ]; then
-      err "脚本在第 ${FAIL_LINE} 行附近失败（退出码 $code）。"
+      err "脚本在第 ${FAIL_LINE} 行附近失败（退出码 ${code}）。"
     else
-      err "脚本执行失败（退出码 $code）。"
+      err "脚本执行失败（退出码 ${code}）。"
     fi
     err "完整日志：$LOG_FILE"
   fi
@@ -250,7 +250,7 @@ prepare_logging() {
 
   # 日志轮转：超过阈值时归档为 .1（保留一份）
   case "$LOG_MAX_MB" in
-    ''|*[!0-9]*) warn "无效的日志阈值: $LOG_MAX_MB（按 5 MB 处理）"; LOG_MAX_MB=5 ;;
+    ''|*[!0-9]*) warn "无效的日志阈值: ${LOG_MAX_MB}（按 5 MB 处理）"; LOG_MAX_MB=5 ;;
   esac
   local rotated=0
   if [ -f "$LOG_FILE" ] && [ "$LOG_MAX_MB" -gt 0 ] 2>/dev/null; then
@@ -712,7 +712,7 @@ validate_args() {
     if [ "$opt" = "--proxy-scope" ]; then
       case "$DSH_PROXY_SCOPE" in
         global|local|system|none) ;;
-        *) die "--proxy-scope 只支持 global | local | system | none（收到: $DSH_PROXY_SCOPE）" ;;
+        *) die "--proxy-scope 只支持 global | local | system | none（收到: ${DSH_PROXY_SCOPE}）" ;;
       esac
     fi
   done
@@ -885,14 +885,14 @@ reject_dangerous_path() {
   local target="$1" label="${2:-目标}"
   local stripped="${target%/}"
   case "$stripped" in
-    ""|"/"|"$HOME"|"."|"..") die "拒绝删除危险路径（$label）: '$target'" ;;
+    ""|"/"|"$HOME"|"."|"..") die "拒绝删除危险路径（${label}）: '$target'" ;;
   esac
   case "$stripped" in
     /*/*) : ;;
-    /*)   die "拒绝删除顶层系统目录（$label）: '$target'" ;;
+    /*)   die "拒绝删除顶层系统目录（${label}）: '$target'" ;;
   esac
   case "$HOME/" in
-    "$stripped"/*) die "拒绝删除危险路径（$label，是用户主目录的上级）: '$target'" ;;
+    "$stripped"/*) die "拒绝删除危险路径（${label}，是用户主目录的上级）: '$target'" ;;
   esac
 }
 
@@ -986,7 +986,7 @@ acquire_lock() {
   fi
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$LOCK_FILE" || die "无法创建锁文件: $LOCK_FILE"
-    flock -n 9 || die "已有另一个 dshctl 实例在运行（锁: $LOCK_FILE）。"
+    flock -n 9 || die "已有另一个 dshctl 实例在运行（锁: ${LOCK_FILE}）。"
     return 0
   fi
   LOCK_DIR="${LOCK_FILE}.d"
@@ -1003,7 +1003,7 @@ acquire_lock() {
       return 0
     fi
   fi
-  die "已有另一个 dshctl 实例在运行（锁目录: $LOCK_DIR）。"
+  die "已有另一个 dshctl 实例在运行（锁目录: ${LOCK_DIR}）。"
 }
 
 # -----------------------------------------------------------------------------
@@ -1218,7 +1218,7 @@ autodetect_proxy() {
       PROXY_AUTODETECTED="$candidate"
       DSH_GIT_PROXY="$candidate"
       export_proxy_env
-      ok "检测到可用本地代理: $candidate（仅本次运行生效）"
+      ok "检测到可用本地代理: ${candidate}（仅本次运行生效）"
       break
     fi
   done
@@ -1289,7 +1289,7 @@ apply_proxy() {
       info "已指定 --proxy-scope none，不改动任何 git 配置。"
       ;;
     *)
-      warn "未知的 --proxy-scope: $DSH_PROXY_SCOPE（按 none 处理）"
+      warn "未知的 --proxy-scope: ${DSH_PROXY_SCOPE}（按 none 处理）"
       DSH_PROXY_SCOPE="none"
       ;;
   esac
@@ -1441,14 +1441,14 @@ ensure_repo() {
             if git -C "$DSH_DIR" checkout -f "$DSH_REF" 2>/dev/null; then
               info "已强制切换（丢弃本地修改）: $DSH_REF"
             else
-              warn "无法切换到 $DSH_REF，继续使用当前版本。"
+              warn "无法切换到 ${DSH_REF}，继续使用当前版本。"
             fi
           fi
         else
           heal_own_gitignore
           if ! git -C "$DSH_DIR" checkout "$DSH_REF" 2>/dev/null; then
             if ! git -C "$DSH_DIR" checkout -B "$DSH_REF" "origin/$DSH_REF" 2>/dev/null; then
-              warn "无法切换到 $DSH_REF，继续使用当前版本。"
+              warn "无法切换到 ${DSH_REF}，继续使用当前版本。"
             fi
           fi
           if git -C "$DSH_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
@@ -1479,7 +1479,7 @@ ensure_repo() {
   fi
 
   if [ -e "$DSH_DIR" ] && [ -n "$(ls -A "$DSH_DIR" 2>/dev/null)" ]; then
-    die "目录已存在且不是 git 仓库: $DSH_DIR（可加 --clean 覆盖，或换 --dir）"
+    die "目录已存在且不是 git 仓库: ${DSH_DIR}（可加 --clean 覆盖，或换 --dir）"
   fi
 
   require_cmd git
@@ -1493,7 +1493,7 @@ ensure_repo() {
   [ "$SHALLOW" -eq 1 ] && clone_args+=(--depth 1)
   # tag/commit 无法用 --branch，失败后回退为完整克隆 + checkout
   if git clone "${clone_args[@]}" "$repo_url" "$DSH_DIR" 2>/dev/null; then
-    ok "已克隆（ref=$DSH_REF）到 $DSH_DIR"
+    ok "已克隆（ref=${DSH_REF}）到 $DSH_DIR"
   else
     warn "按 ref 克隆失败，回退为默认克隆 + checkout ..."
     rm -rf "$DSH_DIR"
@@ -1504,7 +1504,7 @@ ensure_repo() {
   fi
   REPO_HEAD="$(repo_head)"
   apply_local_proxy_after_clone
-  ok "源码位置: $DSH_DIR（HEAD $(git -C "$DSH_DIR" rev-parse --short HEAD)）"
+  ok "源码位置: ${DSH_DIR}（HEAD $(git -C "$DSH_DIR" rev-parse --short HEAD)）"
 }
 
 # -----------------------------------------------------------------------------
@@ -1620,7 +1620,7 @@ write_env() {
   fi
 
   git_exclude_add ".env"
-  ok "已写入 $env_file（权限 600）"
+  ok "已写入 ${env_file}（权限 600）"
 }
 
 # -----------------------------------------------------------------------------
@@ -1866,7 +1866,7 @@ do_uninstall() {
       purge_logs+=("$LEGACY_LOG")
     fi
     [ -e "$DSH_DIR" ] && purge_items+=("源码目录     : $DSH_DIR")
-    [ -e "$dsh_home" ] && purge_items+=("运行数据     : $dsh_home（profiles / storages / 凭据 / 设置）")
+    [ -e "$dsh_home" ] && purge_items+=("运行数据     : ${dsh_home}（profiles / storages / 凭据 / 设置）")
     local lf
     for lf in "${purge_logs[@]}"; do
       [ -f "$lf" ] && purge_items+=("安装日志     : $lf")
@@ -1874,7 +1874,7 @@ do_uninstall() {
     done
     [ -f "$WEB_LAN_PATCH" ] && purge_items+=("局域网补丁   : $WEB_LAN_PATCH")
     [ -f "$HOME/.config/systemd/user/dsh.service" ] && purge_items+=("systemd 服务 : $HOME/.config/systemd/user/dsh.service")
-    [ -d "$STATE_DIR" ] && purge_items+=("服务状态     : $STATE_DIR（web.pid / web.log）")
+    [ -d "$STATE_DIR" ] && purge_items+=("服务状态     : ${STATE_DIR}（web.pid / web.log）")
     if [ -L "$HOME/.local/bin/dshctl" ] && [ "$(script_self_path "$HOME/.local/bin/dshctl")" = "$(script_self_path "$0")" ]; then
       purge_items+=("全局命令     : $HOME/.local/bin/dshctl（软链）")
     fi
@@ -1882,7 +1882,7 @@ do_uninstall() {
     [ -f "$LEGACY_LOCK" ] && purge_items+=("旧版锁文件   : $LEGACY_LOCK")
     if [ -e "$dsh_home" ] && [ "$DO_BACKUP" -eq 1 ]; then
       backup_file="$HOME/dshctl-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
-      purge_items+=("数据备份     : $backup_file（删除前自动打包）")
+      purge_items+=("数据备份     : ${backup_file}（删除前自动打包）")
     fi
 
     if [ "${#purge_items[@]}" -eq 0 ]; then
@@ -1985,7 +1985,7 @@ do_uninstall() {
     rm -f -- "$LOCK_FILE" "$LEGACY_LOCK" 2>/dev/null || true
     ok "完全卸载完成"
     if [ -n "$backup_file" ] && [ -f "$backup_file" ]; then
-      info "数据备份保留在: $backup_file（确认不需要可手动删除）"
+      info "数据备份保留在: ${backup_file}（确认不需要可手动删除）"
     fi
     if [ -d "$HOME/.nvm" ] || [ -d "$HOME/.local/node" ]; then
       info "共享运行时未删除（如需清理请手动执行）："
@@ -2105,7 +2105,7 @@ do_status() {
     local lpid lnote
     lpid="$(port_listener_pid "$DSH_PORT")"
     if [ -n "$lpid" ]; then
-      lnote="（PID $lpid）"
+      lnote="（PID ${lpid}）"
     else
       lnote="（占用进程无法识别，可能来自其他 WSL 发行版/主机）"
     fi
@@ -2239,7 +2239,7 @@ do_doctor() {
     local dp dnote
     dp="$(port_listener_pid "$DSH_PORT")"
     if [ -n "$dp" ]; then
-      dnote="（PID $dp）"
+      dnote="（PID ${dp}）"
     else
       dnote="（占用进程无法识别，可能来自其他 WSL 发行版/主机）"
     fi
@@ -2338,7 +2338,7 @@ service_ctl_pid() {
       local pid
       pid="$(web_running_pid)"
       if [ -n "$pid" ]; then
-        info "服务已在运行（PID $pid），无需重复启动。"
+        info "服务已在运行（PID ${pid}），无需重复启动。"
         return 0
       fi
       local pre_pid=""
@@ -2346,7 +2346,7 @@ service_ctl_pid() {
         pre_pid="$(port_listener_pid "$DSH_PORT")"
         if port_listening "$DSH_PORT"; then
           if [ -n "$pre_pid" ]; then
-            warn "端口 $DSH_PORT 已被占用（PID $pre_pid），本次启动可能失败（可改用 --port 指定其他端口）。"
+            warn "端口 $DSH_PORT 已被占用（PID ${pre_pid}），本次启动可能失败（可改用 --port 指定其他端口）。"
           else
             warn "端口 $DSH_PORT 已被占用且无法识别占用进程（可能来自其他 WSL 发行版/主机，镜像网络模式下可见）。"
             warn "建议改用其他端口: dshctl --start --port <端口>"
@@ -2385,9 +2385,9 @@ service_ctl_pid() {
       fi
       if [ "$up" -eq 1 ]; then
         if [ "$is_web" -eq 1 ]; then
-          ok "已在后台启动（PID $new_pid），端口 $DSH_PORT 监听中。"
+          ok "已在后台启动（PID ${new_pid}），端口 $DSH_PORT 监听中。"
         else
-          ok "已在后台启动 profile「$sp」（PID $new_pid，无端口监控）。"
+          ok "已在后台启动 profile「${sp}」（PID ${new_pid}，无端口监控）。"
         fi
         info "日志: tail -f $log_file"
       else
@@ -2441,7 +2441,7 @@ service_ctl_pid() {
           local lpid2
           lpid2="$(port_listener_pid "$DSH_PORT")"
           if [ -n "$lpid2" ]; then
-            warn "端口 $DSH_PORT 仍被占用（PID $lpid2），请手动检查: kill -9 $lpid2"
+            warn "端口 $DSH_PORT 仍被占用（PID ${lpid2}），请手动检查: kill -9 $lpid2"
           else
             warn "端口 $DSH_PORT 仍被占用但无法识别占用进程：可能来自其他 WSL 发行版 / Windows 主机（镜像网络模式下可见）。"
             warn "请检查其他环境，或为本环境改用其他端口: --port <端口>"
@@ -2451,7 +2451,7 @@ service_ctl_pid() {
         fi
       else
         rm -f -- "$pid_file"
-        ok "服务已停止（profile: $sp）。"
+        ok "服务已停止（profile: ${sp}）。"
       fi
       ;;
   esac
@@ -2488,9 +2488,9 @@ do_register() {
     local target
     target="$(script_self_path "$link")"
     if [ "$target" = "$script_path" ]; then
-      ok "已注册（$link -> $script_path）"
+      ok "已注册（$link -> ${script_path}）"
     elif [ -e "$link" ]; then
-      die "目标已存在且指向其他文件，未改动: $link -> $target（请手动处理后重试）"
+      die "目标已存在且指向其他文件，未改动: $link -> ${target}（请手动处理后重试）"
     else
       rm -f -- "$link"
       ln -s -- "$script_path" "$link"
@@ -2545,9 +2545,9 @@ do_service_action() {
     n="${LAST_LINES:-}"
     if [ "$DRY_RUN" -eq 1 ]; then
       if [ -n "$n" ]; then
-        info "[dry-run] 将显示最近 $n 行服务日志（模式: $mode）。"
+        info "[dry-run] 将显示最近 $n 行服务日志（模式: ${mode}）。"
       else
-        info "[dry-run] 将跟踪服务日志（模式: $mode）。"
+        info "[dry-run] 将跟踪服务日志（模式: ${mode}）。"
       fi
       return 0
     fi
@@ -2567,7 +2567,7 @@ do_service_action() {
   fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    info "[dry-run] 服务操作: $action（模式: $mode）"
+    info "[dry-run] 服务操作: ${action}（模式: ${mode}）"
     return 0
   fi
 
@@ -2679,7 +2679,7 @@ print_policy_violations() {
 plugin_precheck_remove() {
   local pkg="$PROFILES_DIR/$PLUGIN_PROFILE/package.json"
   if [ ! -f "$pkg" ]; then
-    die "profile 未初始化: $PROFILES_DIR/$PLUGIN_PROFILE（没有可卸载的插件）"
+    die "profile 未初始化: $PROFILES_DIR/${PLUGIN_PROFILE}（没有可卸载的插件）"
   fi
   command -v node >/dev/null 2>&1 || return 0
   local out="" rc=0
@@ -2704,7 +2704,7 @@ plugin_precheck_remove() {
     die "请使用完整包名重试（参考上方已装插件列表）。"
   fi
   if [ "$rc" -eq 2 ]; then
-    warn "无法解析 profile 清单（$pkg），跳过卸载预检。"
+    warn "无法解析 profile 清单（${pkg}），跳过卸载预检。"
   fi
   return 0
 }
@@ -2736,7 +2736,7 @@ plugin_current_policy() {
 
 do_plugin_policy() {
   local profile="$PLUGIN_PROFILE"
-  step "minimumReleaseAge 策略审计（profile: $profile）"
+  step "minimumReleaseAge 策略审计（profile: ${profile}）"
 
   local configured=""
   configured="$(plugin_current_policy "$profile")"
@@ -2781,11 +2781,11 @@ do_plugin_policy_set() {
   local old=""
   old="$(plugin_current_policy "$profile")"
   [ -n "$old" ] || old="未显式设置（默认 1440）"
-  if ! confirm_config_change "确认把 profile「$profile」的 minimumReleaseAge 从 $old 改为 $val 分钟？"; then
+  if ! confirm_config_change "确认把 profile「${profile}」的 minimumReleaseAge 从 $old 改为 $val 分钟？"; then
     die "已取消（未修改配置）。"
   fi
   plugin_run "$profile" config set minimumReleaseAge "$val" --location project || die "写入配置失败。"
-  ok "已设置 minimumReleaseAge=$val 分钟（profile: $profile）"
+  ok "已设置 minimumReleaseAge=$val 分钟（profile: ${profile}）"
   if [ "$val" -eq 0 ]; then
     warn "已关闭发布年龄保护：新发布的依赖不再有冷静期，请确认来源可信。"
   fi
@@ -2800,7 +2800,7 @@ do_plugin_policy_reset() {
     info "当前未显式设置 minimumReleaseAge，无需恢复。"
     return 0
   fi
-  if ! confirm_config_change "确认移除 profile「$profile」的 minimumReleaseAge 设置（恢复默认 1440 分钟）？"; then
+  if ! confirm_config_change "确认移除 profile「${profile}」的 minimumReleaseAge 设置（恢复默认 1440 分钟）？"; then
     die "已取消（未修改配置）。"
   fi
   local rc=0
@@ -2857,7 +2857,7 @@ plugin_failure_hint() {
 
 do_plugin_list() {
   local dir="$PROFILES_DIR/$PLUGIN_PROFILE"
-  step "插件列表（profile: $PLUGIN_PROFILE）"
+  step "插件列表（profile: ${PLUGIN_PROFILE}）"
   if [ ! -f "$dir/package.json" ]; then
     info "profile 未初始化: $dir"
     info "首次安装插件可直接执行: dshctl --plugin-add <规格>（会自动初始化 profile）"
@@ -2955,7 +2955,7 @@ do_plugin_action() {
   fi
 
   require_cmd_launcher
-  [ -d "$DSH_DIR/.git" ] || die "源码目录不存在或不是 git 仓库: $DSH_DIR（请先运行 --install）"
+  [ -d "$DSH_DIR/.git" ] || die "源码目录不存在或不是 git 仓库: ${DSH_DIR}（请先运行 --install）"
 
   case "$PLUGIN_ACTION" in
     policy)       do_plugin_policy; return 0 ;;
@@ -3011,12 +3011,12 @@ do_plugin_action() {
   esac
   if [ "$rc" -ne 0 ]; then
     plugin_failure_hint
-    die "插件${action_cn}失败（退出码 $rc，详见上方输出）。"
+    die "插件${action_cn}失败（退出码 ${rc}，详见上方输出）。"
   fi
 
   case "$PLUGIN_ACTION" in
     add|remove|update|repair)
-      ok "插件${action_cn}完成（profile: $profile）"
+      ok "插件${action_cn}完成（profile: ${profile}）"
       maybe_restart_after_plugin_change
       ;;
   esac
@@ -3292,7 +3292,7 @@ do_model_show() {
 do_model_check() {
   step "模型连通性自检"
   require_cmd_launcher
-  [ -d "$DSH_DIR/.git" ] || die "源码目录不存在或不是 git 仓库: $DSH_DIR（请先运行 --install）"
+  [ -d "$DSH_DIR/.git" ] || die "源码目录不存在或不是 git 仓库: ${DSH_DIR}（请先运行 --install）"
 
   local have_key=0
   if [ -n "${DEEPSEEK_API_KEY:-}" ]; then have_key=1; fi
@@ -3322,7 +3322,7 @@ do_model_check() {
   if [ "$rc" -eq 124 ]; then
     warn "自检超时（180 秒）：可能是网络/代理或端点不可达。"
   else
-    warn "自检失败（退出码 $rc）。排查建议："
+    warn "自检失败（退出码 ${rc}）。排查建议："
     warn "  1) dshctl --model-show 查看 key/地址来源与兼容性；"
     warn "  2) dshctl --model-fix 修复旧官方根地址（0.1.6+ 协议变更）；"
     warn "  3) 检查网络/代理，或 --logs 查看服务日志。"
@@ -3395,7 +3395,7 @@ do_model_fix() {
       f="${item%%|*}"; val="${item##*|}"
       cp -a -- "$f" "$f.bak.$ts" 2>/dev/null || die "备份失败: $f"
       env_comment_baseurl "$f" || die "修改失败: $f"
-      ok "已修复: $f（备份: $f.bak.$ts）"
+      ok "已修复: ${f}（备份: $f.bak.${ts}）"
       local old_bak
       while IFS= read -r old_bak; do
         rm -f -- "$old_bak" 2>/dev/null || true
@@ -3452,7 +3452,7 @@ preupgrade_backup_if_needed() {
   local backup_file ts
   ts="$(date +%Y%m%d-%H%M%S)"
   backup_file="$HOME/dshctl-preupgrade-$ts.tar.gz"
-  info "升级前数据保护（$reason）：备份 $DSH_HOME_ABS → $backup_file"
+  info "升级前数据保护（${reason}）：备份 $DSH_HOME_ABS → $backup_file"
   if tar -czf "$backup_file" -C "$(dirname -- "$DSH_HOME_ABS")" "$(basename -- "$DSH_HOME_ABS")" 2>/dev/null; then
     chmod 600 "$backup_file" 2>/dev/null || true
     ok "已备份: $backup_file"
@@ -3501,19 +3501,19 @@ data_home_size() {
 }
 
 do_data_backup() {
-  step "备份运行数据（$DSH_HOME_ABS）"
+  step "备份运行数据（${DSH_HOME_ABS}）"
   if [ ! -d "$DSH_HOME_ABS" ] || [ -z "$(ls -A "$DSH_HOME_ABS" 2>/dev/null)" ]; then
     info "运行数据目录为空或不存在，无需备份。"
     return 0
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
-    info "[dry-run] 将备份 $DSH_HOME_ABS（$(data_home_size "$DSH_HOME_ABS")）。"
+    info "[dry-run] 将备份 ${DSH_HOME_ABS}（$(data_home_size "$DSH_HOME_ABS")）。"
     return 0
   fi
   local mode
   mode="$(service_mode)"
   if [ "$mode" != "none" ]; then
-    warn "检测到服务正在运行（$mode）；运行中备份可能包含未落盘数据，建议先 dshctl --stop。"
+    warn "检测到服务正在运行（${mode}）；运行中备份可能包含未落盘数据，建议先 dshctl --stop。"
     if ! confirm_config_change "服务运行中，仍要现在备份吗？"; then
       die "已取消备份。"
     fi
@@ -3524,7 +3524,7 @@ do_data_backup() {
   info "正在打包（profiles / sessions / storages / 凭据）..."
   if tar -czf "$backup_file" -C "$(dirname -- "$DSH_HOME_ABS")" "$(basename -- "$DSH_HOME_ABS")" 2>/dev/null; then
     chmod 600 "$backup_file" 2>/dev/null || true
-    ok "备份完成: $backup_file（$(data_home_size "$backup_file")）"
+    ok "备份完成: ${backup_file}（$(data_home_size "$backup_file")）"
     info "恢复: dshctl --data-restore \"$backup_file\""
   else
     rm -f -- "$backup_file" 2>/dev/null || true
@@ -3556,14 +3556,14 @@ do_data_restore() {
     rm -rf -- "$tmp"
     die "无法识别备份结构（期望顶层为 .dsh/ 或单一目录）。"
   fi
-  info "备份内容: $(du -sh "$src" 2>/dev/null | cut -f1)（将覆盖 $DSH_HOME_ABS）"
+  info "备份内容: $(du -sh "$src" 2>/dev/null | cut -f1)（将覆盖 ${DSH_HOME_ABS}）"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     rm -rf -- "$tmp"
     info "[dry-run] 以上为预览，未做任何改动。"
     return 0
   fi
-  if ! confirm_config_change "确认用该备份覆盖当前运行数据（$DSH_HOME_ABS）？恢复前会自动备份现状。"; then
+  if ! confirm_config_change "确认用该备份覆盖当前运行数据（${DSH_HOME_ABS}）？恢复前会自动备份现状。"; then
     rm -rf -- "$tmp"
     die "已取消恢复。"
   fi
@@ -3595,7 +3595,7 @@ do_data_restore() {
     die "恢复失败: 无法移动到 $DSH_HOME_ABS"
   fi
   rm -rf -- "$tmp"
-  ok "恢复完成: $DSH_HOME_ABS（$(data_home_size "$DSH_HOME_ABS")）"
+  ok "恢复完成: ${DSH_HOME_ABS}（$(data_home_size "$DSH_HOME_ABS")）"
   if [ "$was_running" -eq 1 ]; then
     maybe_restart_service "数据恢复" 1
   else
@@ -3607,13 +3607,13 @@ do_data_archive_sessions() {
   step "归档旧会话（解决升级后会话不兼容）"
   local sess="$DSH_HOME_ABS/sessions"
   if [ ! -d "$sess" ] || [ -z "$(ls -A "$sess" 2>/dev/null)" ]; then
-    info "会话目录为空或不存在（$sess），无需归档。"
+    info "会话目录为空或不存在（${sess}），无需归档。"
     return 0
   fi
   local ts dest
   ts="$(date +%Y%m%d-%H%M%S)"
   dest="$DSH_HOME_ABS/sessions-archive-$ts"
-  warn "将把 $sess 整体移动到: $dest（数据不删除，可手动移回）"
+  warn "将把 $sess 整体移动到: ${dest}（数据不删除，可手动移回）"
   warn "注意：dsh 的会话/归档列表可能残留失效条目，可在 Web UI「设置 → 已归档会话」中清理。"
   if [ "$DRY_RUN" -eq 1 ]; then
     info "[dry-run] 以上为预览，未做任何改动。"
@@ -3632,7 +3632,7 @@ do_data_archive_sessions() {
   if ! mv -- "$sess" "$dest"; then
     die "归档失败（请检查权限）。"
   fi
-  ok "已归档: $dest（$(du -sh "$dest" 2>/dev/null | cut -f1)）"
+  ok "已归档: ${dest}（$(du -sh "$dest" 2>/dev/null | cut -f1)）"
   if [ "$was_running" -eq 1 ]; then
     maybe_restart_service "会话归档" 1
   else
@@ -3739,7 +3739,7 @@ rollback_prev_target() { # 输出上一次与当前 HEAD 不同的历史提交�
 
 do_rollback_prepare() {
   step "回退到历史版本"
-  [ -d "$DSH_DIR/.git" ] || die "源码目录不存在: $DSH_DIR（请先 --install）"
+  [ -d "$DSH_DIR/.git" ] || die "源码目录不存在: ${DSH_DIR}（请先 --install）"
   local target="$ROLLBACK_REF"
   if [ -z "$target" ]; then
     target="$(rollback_prev_target)"
@@ -3747,7 +3747,7 @@ do_rollback_prepare() {
   fi
   local short=""
   short="$(git -C "$DSH_DIR" rev-parse --short "$target" 2>/dev/null || true)"
-  info "回退目标: $target${short:+（本地已有提交 $short）}"
+  info "回退目标: $target${short:+（本地已有提交 ${short}）}"
   warn "注意：回退只改源码版本，不会回滚 ~/.dsh 运行数据；新版本写入的数据可能与旧版本不兼容。"
   warn "      建议先执行: dshctl --data-backup"
   if ! confirm_config_change "确认回退到该版本并重新构建？"; then
@@ -3766,7 +3766,7 @@ do_rollback_prepare() {
 # -----------------------------------------------------------------------------
 do_url() {
   step "Web UI 访问地址"
-  [ -f "$WEB_LOG_FILE" ] || die "未找到服务日志（$WEB_LOG_FILE）；请先 dshctl --start。"
+  [ -f "$WEB_LOG_FILE" ] || die "未找到服务日志（${WEB_LOG_FILE}）；请先 dshctl --start。"
   local url=""
   url="$(grep -Eo 'http://[^ ]*\?token=[A-Za-z0-9._-]+' "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
   if [ -z "$url" ]; then
@@ -3866,7 +3866,7 @@ do_model_set_base() {
     *) die "--model-set-base 需要 http(s):// 开头的地址: $url" ;;
   esac
   case "$url" in *'#'*) die "地址包含 # 字符，暂不支持。" ;; esac
-  [ -d "$DSH_DIR" ] || die "源码目录不存在: $DSH_DIR（请先 --install）"
+  [ -d "$DSH_DIR" ] || die "源码目录不存在: ${DSH_DIR}（请先 --install）"
 
   local eff src cur
   eff="$(model_effective_base)"
@@ -3911,7 +3911,7 @@ do_model_set_base() {
     [ -n "$v" ] || continue
     cp -a -- "$f" "$f.bak.$ts" 2>/dev/null || true
     if env_comment_baseurl "$f"; then
-      ok "已注释 .env 非法项: $f（原值: $v）"
+      ok "已注释 .env 非法项: ${f}（原值: ${v}）"
     else
       warn "注释失败，请手动处理: $f"
     fi
@@ -4000,7 +4000,7 @@ summary() {
   if [ "$DO_WEB_LAN" -eq 1 ]; then
     direct_cmd="pnpm dsh web --patch \"$WEB_LAN_PATCH\""
     if [ "$DO_LAUNCHER" -eq 1 ]; then
-      web_scope="已启用局域网访问：其他设备访问 http://<本机IP>:$DSH_PORT（设置/模型等页面仅本机可用）"
+      web_scope="已启用局域网访问：其他设备访问 http://<本机IP>:${DSH_PORT}（设置/模型等页面仅本机可用）"
     else
       web_scope="补丁已写入；本次未更新启动器，手动启动请加 --patch"
     fi
@@ -4148,7 +4148,7 @@ main() {
     DSH_HOST="127.0.0.1"
   fi
   if [ "$DSH_HOST" = "::" ] || [ "$DSH_HOST" = "[::]" ]; then
-    die "上游 dsh 不支持该监听地址（$DSH_HOST）；局域网访问请用 --web-lan。"
+    die "上游 dsh 不支持该监听地址（${DSH_HOST}）；局域网访问请用 --web-lan。"
   fi
   if [ "$DSH_HOST" != "127.0.0.1" ]; then
     die "上游仅支持 --host 127.0.0.1；局域网访问请用 --web-lan（绑定 0.0.0.0）。"
@@ -4177,7 +4177,7 @@ main() {
   else
     major="${git_ver%%.*}"; minor="${git_ver##*.}"
     if [ "${major:-0}" -lt 2 ] || { [ "${major:-0}" -eq 2 ] && [ "${minor:-0}" -lt 26 ]; }; then
-      warn "检测到 git $git_ver，官方开发指南要求 2.26 及以上（可能影响 Git 集成特性）。"
+      warn "检测到 git ${git_ver}，官方开发指南要求 2.26 及以上（可能影响 Git 集成特性）。"
     else
       ok "git $git_ver 满足要求"
     fi

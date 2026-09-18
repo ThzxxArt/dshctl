@@ -31,6 +31,28 @@ assert_command "CHANGELOG 包含当前版本小节" grep -qF "## [$script_versio
 assert_command "README 徽章指向仓库地址" grep -qF "github.com/ThzxxArt/dshctl" "$PROJECT_ROOT/README.md"
 assert_command "脚本内包含项目主页" grep -qF "github.com/ThzxxArt/dshctl" "$DSHCTL"
 
+# macOS 自带 Bash 3.2 会把紧随 $var 的多字节字节吞进变量名（C locale 下），
+# 运行时表现为 "unbound variable" 或值丢失；必须写成 ${var}。这里做静态防线。
+mb_hits=""
+for mb_file in "$DSHCTL" "$TESTS_DIR/lib.sh"; do
+  mb_out="$(awk '
+    /^[[:space:]]*cat <<.EOF.$/ { skip = 1; next }
+    skip { if ($0 == "EOF") skip = 0; next }
+    /^[[:space:]]*#/ { next }
+    /[$][A-Za-z_][A-Za-z0-9_]*[^ -~]/ { print FILENAME ":" FNR ": " $0 }
+  ' "$mb_file")"
+  if [ -n "$mb_out" ]; then
+    mb_hits="$mb_hits$mb_out
+"
+  fi
+done
+if [ -n "$mb_hits" ]; then
+  _fail "存在 \$var 紧跟多字节字符的模式（需写成 \${var} 以兼容 macOS Bash 3.2）："
+  printf '%s\n' "$mb_hits" | sed 's/^/    /'
+else
+  _pass "无 \$var 紧跟多字节字符的模式（macOS Bash 3.2 兼容）"
+fi
+
 run_dshctl --version
 assert_rc 0 "--version 在隔离环境可用"
 assert_stdout_contains "dshctl.sh v$script_version" "--version 与脚本内版本一致"
