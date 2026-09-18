@@ -1,0 +1,67 @@
+name: Bug 报告
+description: 报告 dshctl 的行为异常
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先搜索现有 Issue，确认不是重复问题。
+        安全漏洞请勿使用本模板，见 [SECURITY.md](../blob/main/SECURITY.md)。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 发生了什么？你期望发生什么？
+      placeholder: 描述实际行为与期望行为的差异
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请给出最小可复现的命令序列
+      placeholder: |
+        1. 执行 bash dshctl.sh ...
+        2. 看到 ...
+        3. 期望 ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: dshctl 版本
+      description: "`bash dshctl.sh --version` 的输出"
+      placeholder: dshctl.sh v1.4.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: 例如 Ubuntu 24.04 / macOS 15 / WSL2 (Windows 11)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与体检输出
+      description: "`~/.dshctl.log` 相关片段或 `bash dshctl.sh --doctor` 输出（请先脱敏）"
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我已搜索过现有 Issue，确认不是重复问题
+          required: true
+        - label: 我使用的是最新版本（或已在描述中说明具体版本）
+          required: true

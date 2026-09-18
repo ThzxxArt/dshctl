@@ -1,0 +1,20 @@
+# 默认按文本处理，统一使用 LF（仓库可能同时被 WSL / Windows / macOS 检出）
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.bash text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+Makefile text eol=lf
+
+# 二进制文件不做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.gz binary
+*.xz binary
+*.tar binary

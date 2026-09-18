@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# 仓库工程一致性：脚本版本、CHANGELOG、README、语法与可执行位
+
+set -uo pipefail
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+trap teardown EXIT
+
+setup
+
+script_version="$(sed -n 's/^DSHCTL_VERSION="\(.*\)"$/\1/p' "$DSHCTL")"
+assert_command "能解析 DSHCTL_VERSION" test -n "$script_version"
+
+assert_command "bash -n 语法检查" bash -n "$DSHCTL"
+assert_command "脚本具备可执行权限" test -x "$DSHCTL"
+assert_equals "$(head -n1 "$DSHCTL")" "#!/usr/bin/env bash" "脚本 shebang 正确"
+assert_command "包含 SPDX 许可证标识" grep -qF "SPDX-License-Identifier: MIT" "$DSHCTL"
+
+assert_file_exists "$PROJECT_ROOT/LICENSE" "LICENSE 存在"
+assert_file_exists "$PROJECT_ROOT/CHANGELOG.md" "CHANGELOG 存在"
+assert_file_exists "$PROJECT_ROOT/README.md" "中文 README 存在"
+assert_file_exists "$PROJECT_ROOT/README.en.md" "英文 README 存在"
+assert_file_exists "$PROJECT_ROOT/CONTRIBUTING.md" "贡献指南存在"
+assert_file_exists "$PROJECT_ROOT/CODE_OF_CONDUCT.md" "行为准则存在"
+assert_file_exists "$PROJECT_ROOT/SECURITY.md" "安全政策存在"
+assert_file_exists "$PROJECT_ROOT/docs/usage.md" "使用手册存在"
+assert_file_exists "$PROJECT_ROOT/docs/troubleshooting.md" "排障手册存在"
+assert_file_exists "$PROJECT_ROOT/docs/development.md" "开发指南存在"
+
+assert_command "CHANGELOG 包含当前版本小节" grep -qF "## [$script_version]" "$PROJECT_ROOT/CHANGELOG.md"
+assert_command "README 徽章指向仓库地址" grep -qF "github.com/thzxx/dshctl" "$PROJECT_ROOT/README.md"
+assert_command "脚本内包含项目主页" grep -qF "github.com/thzxx/dshctl" "$DSHCTL"
+
+run_dshctl --version
+assert_rc 0 "--version 在隔离环境可用"
+assert_stdout_contains "dshctl.sh v$script_version" "--version 与脚本内版本一致"
+
+finish

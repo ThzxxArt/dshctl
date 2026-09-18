@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 创建 GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 校验 tag 与脚本版本一致
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          script_version="$(sed -n 's/^DSHCTL_VERSION="\(.*\)"$/\1/p' dshctl.sh)"
+          if [ -z "$script_version" ]; then
+            echo "无法从 dshctl.sh 解析 DSHCTL_VERSION" >&2
+            exit 1
+          fi
+          if [ "$tag_version" != "$script_version" ]; then
+            echo "tag v${tag_version} 与脚本版本 ${script_version} 不一致" >&2
+            exit 1
+          fi
+          echo "版本一致: v${tag_version}"
+
+      - name: 从 CHANGELOG 提取发布说明
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { flag = 1; next }
+            flag && /^## \[/ { exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "详见 CHANGELOG.md" > release-notes.md
+          fi
+
+      - name: 创建 Release 并附加脚本
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dshctl.sh \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md

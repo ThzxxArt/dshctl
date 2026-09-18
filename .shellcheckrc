@@ -1,0 +1,8 @@
+# ShellCheck 配置
+#
+# 检查方式（与 CI、make lint 保持一致）：
+#   shellcheck --severity=warning -x dshctl.sh
+#
+# SC1111：中文排版引号（“ ” ‘ ’）是面向用户文案的有意组成部分，
+#         不是误敲的 ASCII 引号。
+disable=SC1111

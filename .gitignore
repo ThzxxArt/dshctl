@@ -1,0 +1,25 @@
+# 日志与本地运行产物
+*.log
+*.log.*
+
+# dshctl 产生的备份
+dshctl-backup-*.tar.gz
+dshctl-preupgrade-*.tar.gz
+*.bak
+*.bak.*
+
+# 本地配置与凭据（严禁提交）
+.env
+.env.*
+!.env.example
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# 测试临时目录
+/tmp/
