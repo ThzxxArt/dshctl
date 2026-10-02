@@ -56,6 +56,14 @@ assert_output_contains "proxy-scope" "proxy-scope 错误提示"
 run_dshctl --install --last 10
 assert_rc 1 "--last 不能用于安装模式"
 
+run_dshctl --model-show --model-fix
+assert_rc 1 "模型维护命令互斥"
+assert_output_contains "操作冲突" "模型命令冲突提示"
+
+run_dshctl --plugin-allow foo@1.0.0 --plugin-revoke foo@1.0.0
+assert_rc 1 "插件豁免命令互斥"
+assert_output_contains "操作冲突" "插件豁免冲突提示"
+
 run_dshctl --rollback --ref v1.0.0
 assert_rc 1 "--rollback 与 --ref 冲突"
 assert_output_contains "不能同时使用" "回退参数冲突提示"

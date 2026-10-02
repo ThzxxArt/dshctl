@@ -18,8 +18,10 @@
 #
 #  运维能力：--status 状态 / --doctor 体检 / --start|--stop|--restart|--logs 服务控制
 #  插件能力：--plugin-list / --plugin-add / --plugin-remove / --plugin-update / --plugin-why
+#             / --plugin-repair / --plugin-policy* / --plugin-exemptions / --plugin-allow / --plugin-revoke
 #             （--profile 指定 profile，默认 web；插件变更需重启服务生效）
-#  模型维护：--model-show / --model-check / --model-fix（0.1.6 Messages 协议兼容排障）
+#  模型维护：--model-show / --model-check / --model-fix / --model-set-base
+#             （0.1.6 起 Messages 协议；0.1.7+ 配置位于 profile 的 cordis.patch.yml）
 #  数据维护：--data-backup / --data-restore / --data-archive-sessions / --data-prune
 #  版本能力：--rollback / --upgrade-check / --url / --backups-list / --backups-prune
 #  卸载能力：--uninstall 部分卸载 / --purge 完全卸载（自动备份运行数据）
@@ -102,7 +104,7 @@ MODEL_ACTION=""
 MODEL_BASE_URL=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.4.0"
+DSHCTL_VERSION="1.4.1"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -358,9 +360,14 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --plugin-policy       审计 minimumReleaseAge 策略（当前值 / 违规包 / 精确等待时间）
       --plugin-policy-set N 设置 minimumReleaseAge=N 分钟（0 = 关闭；默认 1440）
       --plugin-policy-reset 移除该设置，恢复 pnpm 默认（1440 分钟 / 24 小时）
+      --plugin-exemptions   查看 profile 的精确版本豁免（dsh 0.2.0+ 插件兼容性门禁）
+      --plugin-allow SPEC   授予 SPEC（包名@精确版本）对当前 dsh 版本的豁免；
+                            存在崩溃/数据损坏风险，需确认（-y 跳过）
+      --plugin-revoke SPEC  撤销已授予的精确版本豁免
       --data-backup         备份 ~/.dsh 运行数据（会话/凭据/设置）
       --data-restore FILE   从备份恢复 ~/.dsh（恢复前自动备份现状；先停服务）
-      --data-archive-sessions  归档旧会话（解决升级后会话不兼容；数据不删除可恢复）
+      --data-archive-sessions  归档旧会话（软重置；数据不删除可恢复。
+                             dsh 0.2.0 起会话格式自动迁移，一般无需执行）
       --data-prune          清理可安全重建的缓存（图片请求缓存等）
       --rollback [REF]      回退到上一次成功安装的版本（或指定 tag/commit）并重建
       --upgrade-check       检查上游最新版本与本地差异（只读）
@@ -387,7 +394,8 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
             localhost 访问，或用 SSH 隧道把端口转发到本地后再配置。
       --no-web-lan          保持仅本机访问（默认；交互安装时会询问）
       --api-key KEY         写入 .env 的 DEEPSEEK_API_KEY
-      --base-url URL        设置模型 API 地址（写入 settings.yaml 的 llm-deepseek.baseURL；
+      --base-url URL        设置模型 API 地址（dsh 0.1.7+ 写入 profile 配置，
+                            0.1.6 及以下写入 settings.yaml 的 llm-deepseek.baseURL；
                             dsh 0.1.6+ 不允许把 DEEPSEEK_BASE_URL 写在 .env）
 
 网络 / 代理 / 加速选项:
@@ -413,7 +421,8 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
 
 构建选项:
       --no-build            只安装依赖，不执行构建
-      --typecheck           安装后额外运行 pnpm run typecheck
+      --typecheck           安装后额外运行 pnpm run typecheck（dsh 0.2.0+ 会
+                            连带构建 desktop bundle，耗时明显变长）
       --skip-deps           跳过 pnpm install（复用已有依赖）
       --rebuild             强制重跑依赖安装与构建（忽略"源码未变化"智能跳过）
       --force-update        更新源码时丢弃本地修改（git reset --hard 到目标 ref），
@@ -440,31 +449,39 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --log-max-mb N        日志轮转阈值 MB（默认: 5，0 关闭）
 
 插件管理（需先 --install；bundle 插件变更后需重启服务才生效）:
-      --profile NAME        指定 profile（插件操作默认 web；服务控制可用于其他 profile）
+      --profile NAME        指定 profile（插件与模型操作默认 web；服务控制可用其他 profile）
       说明：插件安装/卸载/更新完成后会检测服务状态：交互时询问是否重启，
             -y 或非交互环境自动重启；安装插件 = 安装可执行代码，请确认来源可信。
+            dsh 0.2.0+ 会按插件 peerDependencies 校验 dsh 版本：不兼容的安装会被
+            拒绝并回滚；已安装但未豁免的插件会被启动拒载（--plugin-exemptions 查看，
+            --plugin-allow 授予精确版本豁免）。
 
 模型维护（dsh 0.1.6+ Base URL 配置规范排障）:
       --model-show          查看生效的模型配置（key 脱敏、来源标注、合规性检查）
       --model-check         连通性自检：headless 发一条最小测试消息
-      --model-fix           修复不合规 Base URL：.env 中的设置（任何值，0.1.6+ 会导致
-                            拒绝启动）自动注释并备份；settings/环境变量旧根地址给指引
-      --model-set-base URL  设置模型 API 地址（写入 settings.yaml 的 llm-deepseek.baseURL，
-                            dsh 热读取无需重启；并自动清理 .env 非法项）
+      --model-fix           修复不合规配置：.env 中的 DEEPSEEK_BASE_URL（任何值，
+                            0.1.6+ 会导致拒绝启动）自动注释并备份；0.1.7+ 配置中
+                            不再支持的 protocol 字段自动移除；旧根地址给出指引
+      --model-set-base URL  设置模型 API 地址（dsh 0.1.7+ 写入 profile 配置
+                            cordis.patch.yml，0.1.6 及以下写入 settings.yaml；自动
+                            清理 .env 非法项，dsh 会热加载配置或提示重启）
       说明：dsh 0.1.6 起默认 Messages 协议（官方端点 https://api.deepseek.com/anthropic）；
-            Base URL 只允许来自 settings.yaml 或启动环境变量，写进 .env 会被拒绝启动。
+            Base URL 只允许来自 profile/settings 配置或启动环境变量，写进 .env 会被拒绝启动。
 
 数据维护（运行数据位于 ~/.dsh，升级前后建议先 --data-backup）:
       --data-backup         备份 ~/.dsh 到 ~/dshctl-backup-<时间戳>.tar.gz
       --data-restore FILE   从备份恢复（自动备份现状并先停止服务）
       --data-archive-sessions
                             把 sessions/ 整体归档为 sessions-archive-<时间戳>
-                            （升级后旧会话不兼容、发不出消息时的软重置；数据保留）
+                            （软重置；数据保留。dsh 0.2.0 起会话格式自动迁移，
+                            一般无需执行）
       --data-prune          清理可重建的图片请求缓存等
 
 版本管理:
       --rollback [REF]      回退到上一次成功安装的版本（或指定 ref/tag/commit），
-                            自动重新构建；不回滚 ~/.dsh 数据
+                            自动重新构建；不回滚 ~/.dsh 数据。注意：0.1.7+ 的配置
+                            已迁移到 profile 配置、0.2.0 会话为 v4 格式，回退后可能
+                            在旧版本中不可用，执行前请先 --data-backup
       --upgrade-check       对比上游最新 tag / master 与本地版本（只读）
 
 访问助手:
@@ -504,9 +521,12 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
   bash dshctl.sh --plugin-repair          # 修复 pnpm 供应链策略拦截（重建 profile 锁文件）
   bash dshctl.sh --plugin-policy          # 审计 policy 状态与违规包
   bash dshctl.sh --plugin-policy-set 0    # 关闭 minimumReleaseAge（0 分钟）
+  bash dshctl.sh --plugin-exemptions      # 查看插件精确版本豁免（0.2.0+）
+  bash dshctl.sh --plugin-allow pkg@1.2.3 # 授予豁免（风险确认；-y 免交互）
   bash dshctl.sh --model-show             # 查看模型配置与协议兼容性
   bash dshctl.sh --model-check            # 模型连通性自检（发一条最小消息）
-  bash dshctl.sh --model-fix              # 修复旧官方根地址（0.1.6 协议变更）
+  bash dshctl.sh --model-fix              # 修复 .env 非法项与 0.1.7+ 的 protocol 字段
+  bash dshctl.sh --model-set-base https://api.deepseek.com/anthropic
   bash dshctl.sh --data-backup            # 备份 ~/.dsh（升级前建议）
   bash dshctl.sh --data-archive-sessions  # 旧会话不兼容时软重置（数据保留）
   bash dshctl.sh --rollback               # 回退到上一次成功安装的版本
@@ -545,13 +565,13 @@ require_mode() {
   die "选项 $opt 不能与 $MODE 操作一起使用；安装/更新请加 --install（详见 --help）"
 }
 
-# --profile 专用校验：只能与插件管理或服务控制命令一起使用
+# --profile 专用校验：只能与插件管理、模型维护或服务控制命令一起使用
 require_mode_profile() {
-  if [ "$MODE" = "plugins" ] || [ "$MODE" = "service" ]; then return 0; fi
+  if [ "$MODE" = "plugins" ] || [ "$MODE" = "model" ] || [ "$MODE" = "service" ]; then return 0; fi
   if [ -z "$MODE" ]; then
-    die "选项 --profile 只能与插件管理命令一起使用（--plugin-* 系列，详见 --help）"
+    die "选项 --profile 只能与插件管理 / 模型维护命令一起使用（--plugin-* / --model-*，详见 --help）"
   fi
-  die "选项 --profile 不能与 $MODE 操作一起使用（仅限插件管理命令与服务控制，详见 --help）"
+  die "选项 --profile 不能与 $MODE 操作一起使用（仅限插件管理 / 模型维护命令与服务控制，详见 --help）"
 }
 
 validate_args() {
@@ -574,6 +594,9 @@ validate_args() {
       --plugin-policy) plugin_acts+=("policy") ;;
       --plugin-policy-set)   plugin_acts+=("policy-set") ;;
       --plugin-policy-reset) plugin_acts+=("policy-reset") ;;
+      --plugin-exemptions)   plugin_acts+=("exemptions") ;;
+      --plugin-allow)        plugin_acts+=("allow-version") ;;
+      --plugin-revoke)       plugin_acts+=("revoke-version") ;;
       --model-show)  model_acts+=("show") ;;
       --model-check) model_acts+=("check") ;;
       --model-fix)   model_acts+=("fix") ;;
@@ -641,7 +664,7 @@ validate_args() {
     case "$opt" in
       -y|--yes|--log|--log-max-mb|-h|--help|-V|--version) ;;
       --install|--status|--doctor|--start|--stop|--restart|--logs|--uninstall|--purge|--register|--unregister) ;;
-      --plugin-list|--plugin-add|--plugin-remove|--plugin-update|--plugin-why|--plugin-repair|--plugin-policy|--plugin-policy-set|--plugin-policy-reset) ;;
+      --plugin-list|--plugin-add|--plugin-remove|--plugin-update|--plugin-why|--plugin-repair|--plugin-policy|--plugin-policy-set|--plugin-policy-reset|--plugin-exemptions|--plugin-allow|--plugin-revoke) ;;
       --model-show|--model-check|--model-fix|--model-set-base) ;;
       --data-backup|--data-restore|--data-archive-sessions|--data-prune) ;;
       --backups-list|--backups-prune) ;;
@@ -814,6 +837,9 @@ while [ "$#" -gt 0 ]; do
     --plugin-policy)     PLUGIN_ACTION="policy" ;;
     --plugin-policy-set)   need_val "$@"; PLUGIN_ACTION="policy-set"; PLUGIN_SPECS+=("$2"); shift ;;
     --plugin-policy-reset) PLUGIN_ACTION="policy-reset" ;;
+    --plugin-exemptions) PLUGIN_ACTION="exemptions" ;;
+    --plugin-allow)      need_val "$@"; PLUGIN_ACTION="allow-version"; PLUGIN_SPECS+=("$2"); shift ;;
+    --plugin-revoke)     need_val "$@"; PLUGIN_ACTION="revoke-version"; PLUGIN_SPECS+=("$2"); shift ;;
     --profile)           need_val "$@"; PLUGIN_PROFILE="$2"; shift ;;
     --model-show)        MODEL_ACTION="show" ;;
     --model-check)       MODEL_ACTION="check" ;;
@@ -1560,10 +1586,10 @@ do_build() {
 # 环境变量文件
 # -----------------------------------------------------------------------------
 write_env() {
-  step "配置环境变量（.env）与模型地址（settings.yaml）"
+  step "配置环境变量（.env）与模型地址"
   local env_file="$DSH_DIR/.env"
 
-  # 既有值处理：key 保留；.env 中的 base 为非法（0.1.6+ 拒绝启动）→ 迁移到 settings.yaml 并注释
+  # 既有值处理：key 保留；.env 中的 base 为非法（0.1.6+ 拒绝启动）→ 迁移到 profile/settings 配置并注释
   local exist_key="" exist_base="" migrated_base=""
   if [ -f "$env_file" ]; then
     exist_key="$(read_env_var "$env_file" DEEPSEEK_API_KEY)"
@@ -1600,22 +1626,24 @@ write_env() {
       echo "# DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx"
     fi
     echo "# 注意: DEEPSEEK_BASE_URL 不能写在 .env（dsh 0.1.6+ 会拒绝启动）；"
-    echo "#       请使用 settings.yaml（llm-deepseek.baseURL，可用 dshctl --model-set-base）或启动环境变量。"
+    echo "#       请使用 profile 配置（dsh 0.1.7+）/ settings.yaml（0.1.6 及以下），"
+    echo "#       可用 dshctl --model-set-base 写入，或使用启动环境变量。"
   } > "$env_file"
   chmod 600 "$env_file" 2>/dev/null || true
 
   if [ -n "$DSH_BASE_URL" ]; then
-    local settings_file="$DSH_HOME_ABS/settings.yaml"
-    if [ -f "$settings_file" ]; then
-      cp -a -- "$settings_file" "$settings_file.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+    local doc
+    doc="$(model_settings_document_path)"
+    if [ -f "$doc" ]; then
+      cp -a -- "$doc" "$doc.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
     fi
     if settings_write_baseurl "$DSH_BASE_URL"; then
-      ok "已写入 settings.yaml: llm-deepseek.baseURL=$DSH_BASE_URL"
+      ok "已写入 ${doc}: llm-deepseek.baseURL=$DSH_BASE_URL"
       if [ -n "$migrated_base" ]; then
-        info "（旧值已从 .env 迁移至 settings.yaml）"
+        info "（旧值已从 .env 迁移至合法配置位置）"
       fi
     else
-      warn "写入 settings.yaml 失败；请手动配置 llm-deepseek.baseURL=$DSH_BASE_URL"
+      warn "写入 ${doc} 失败；请手动配置 llm-deepseek.baseURL=$DSH_BASE_URL"
     fi
   fi
 
@@ -2128,8 +2156,8 @@ do_status() {
   local model_ver=""
   model_ver="$(installed_dsh_version || true)"
   if [ -n "$model_ver" ]; then
-    if [ -n "$(model_old_root_findings)" ] && version_has_messages_protocol "$model_ver"; then
-      printf '  模型兼容   : ⚠ 检测到不合规 Base URL 配置（--model-fix 可修复）\n'
+    if [ -n "$(model_old_root_findings)$(model_protocol_findings)" ] && version_has_messages_protocol "$model_ver"; then
+      printf '  模型兼容   : ⚠ 检测到不合规模型配置（--model-fix 可修复）\n'
     else
       printf '  模型兼容   : ✔ 无问题（dsh %s）\n' "$model_ver"
     fi
@@ -2273,6 +2301,11 @@ do_doctor() {
     plerr="$(grep -nE "plugin tree failed|failed to (load|apply) loader entry" "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
     if [ -n "$plerr" ]; then
       printf '  插件加载   : ⚠ 检测到加载错误（dshctl --logs --last 100 查看）\n'
+    fi
+    local pcompat=""
+    pcompat="$(grep -nE "is incompatible with dsh|profile startup denies it" "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
+    if [ -n "$pcompat" ]; then
+      printf '  插件兼容   : ⚠ 检测到不兼容插件（--plugin-exemptions 查看豁免；--plugin-allow 授予）\n'
     fi
   fi
 
@@ -2851,6 +2884,15 @@ plugin_failure_hint() {
       warn "若上方输出提示 pnpm 的 allowBuilds 拦截（含构建步骤的 git 插件），"
       warn "请把提示的 key 加入以下文件后重试: $PROFILES_DIR/$PLUGIN_PROFILE/pnpm-workspace.yaml"
       ;;
+    *"installation rejected:"*|*"is incompatible with dsh"*)
+      warn "原因：插件版本与当前 dsh 运行时不兼容（dsh 0.2.0+ 的 peerDependencies 校验，安装已回滚）。"
+      local compat_ver=""
+      compat_ver="$(installed_dsh_version || true)"
+      warn "查看已授予的精确版本豁免: dshctl --plugin-exemptions"
+      warn "确认风险后授予豁免: dshctl --plugin-allow <包名>@<版本>（当前 dsh: ${compat_ver:-未知}）"
+      warn "撤销豁免: dshctl --plugin-revoke <包名>@<版本>"
+      warn "更推荐的做法是安装与该 dsh 版本兼容的插件版本。"
+      ;;
   esac
   return 0
 }
@@ -2925,6 +2967,8 @@ maybe_restart_after_plugin_change() {
 
 do_plugin_action() {
   local profile="$PLUGIN_PROFILE"
+  local dsh_ver=""
+  dsh_ver="$(installed_dsh_version || true)"
   resolve_effective_port
 
   if [ "$PLUGIN_ACTION" = "list" ]; then
@@ -2942,13 +2986,27 @@ do_plugin_action() {
     policy) action_cn="审计" ;;
     policy-set) action_cn="设置" ;;
     policy-reset) action_cn="恢复" ;;
+    exemptions)   action_cn="豁免查询" ;;
+    allow-version) action_cn="授予豁免" ;;
+    revoke-version) action_cn="撤销豁免" ;;
   esac
+
+  # 豁免命令的规格校验先于 dry-run，保证非法输入在预览阶段也能被发现
+  if [ "$PLUGIN_ACTION" = "allow-version" ] || [ "$PLUGIN_ACTION" = "revoke-version" ]; then
+    case "${PLUGIN_SPECS[0]:-}" in
+      *@?*) ;;
+      *) die "选项 --plugin-${PLUGIN_ACTION%%-*} 需要「包名@精确版本」，收到: ${PLUGIN_SPECS[0]:-（空）}" ;;
+    esac
+  fi
 
   if [ "$DRY_RUN" -eq 1 ] && [ "$PLUGIN_ACTION" != "policy" ]; then
     case "$PLUGIN_ACTION" in
       repair)       info "[dry-run] 将执行: dsh plugin --profile $profile clean --lockfile && dsh plugin --profile $profile install" ;;
       policy-set)   info "[dry-run] 将执行: dsh plugin --profile $profile config set minimumReleaseAge ${PLUGIN_SPECS[0]:-?} --location project" ;;
       policy-reset) info "[dry-run] 将执行: dsh plugin --profile $profile config delete minimumReleaseAge --location project" ;;
+      exemptions)   info "[dry-run] 将执行: dsh plugin --profile $profile version-exemptions" ;;
+      allow-version) info "[dry-run] 将执行: dsh plugin --profile $profile allow-version ${PLUGIN_SPECS[0]:-?} --dsh-version ${dsh_ver:-<当前 dsh 版本>} --accept-risk" ;;
+      revoke-version) info "[dry-run] 将执行: dsh plugin --profile $profile revoke-version ${PLUGIN_SPECS[0]:-?} --dsh-version ${dsh_ver:-<当前 dsh 版本>}" ;;
       *)            info "[dry-run] 将执行: dsh plugin --profile $profile $PLUGIN_ACTION ${PLUGIN_SPECS[*]:-}" ;;
     esac
     return 0
@@ -2961,6 +3019,43 @@ do_plugin_action() {
     policy)       do_plugin_policy; return 0 ;;
     policy-set)   do_plugin_policy_set; return 0 ;;
     policy-reset) do_plugin_policy_reset; return 0 ;;
+    exemptions)
+      info "查询精确版本豁免（profile: ${profile}）..."
+      local xrc=0
+      plugin_run "$profile" version-exemptions || xrc=$?
+      if [ "$xrc" -ne 0 ]; then
+        plugin_failure_hint
+        die "豁免查询失败（退出码 ${xrc}）。"
+      fi
+      return 0
+      ;;
+    allow-version|revoke-version)
+      local spec="${PLUGIN_SPECS[0]:-}"
+      [ -n "$dsh_ver" ] || die "无法确定已安装 dsh 版本（请确认源码目录与 node 可用）。"
+      local arc=0
+      if [ "$PLUGIN_ACTION" = "allow-version" ]; then
+        warn "授予精确版本豁免表示接受插件与 dsh ${dsh_ver} 不兼容的风险（可能崩溃或数据损坏）。"
+        if ! confirm_config_change "确认授予 ${spec} 对 dsh ${dsh_ver} 的豁免？"; then
+          die "已取消（未修改配置）。"
+        fi
+        info "授予豁免: ${spec}（dsh ${dsh_ver}）"
+        plugin_run "$profile" allow-version "$spec" --dsh-version "$dsh_ver" --accept-risk || arc=$?
+      else
+        info "撤销豁免: ${spec}（dsh ${dsh_ver}）"
+        plugin_run "$profile" revoke-version "$spec" --dsh-version "$dsh_ver" || arc=$?
+      fi
+      if [ "$arc" -ne 0 ]; then
+        plugin_failure_hint
+        die "${action_cn}失败（退出码 ${arc}）。"
+      fi
+      if [ "$PLUGIN_ACTION" = "allow-version" ]; then
+        ok "已授予豁免: ${spec}（dsh ${dsh_ver}）"
+      else
+        ok "已撤销豁免: ${spec}（dsh ${dsh_ver}）"
+      fi
+      maybe_restart_service "插件版本豁免"
+      return 0
+      ;;
   esac
 
   local -a specs=()
@@ -3066,9 +3161,276 @@ read_settings_llm_value() { # $1=settings.yaml $2=键名（如 baseURL / protoco
   return 0
 }
 
-# 写入 $DSH_HOME/settings.yaml 的 llm-deepseek.baseURL（dsh 0.1.6+ 唯一合法的配置文件位置）
+# -----------------------------------------------------------------------------
+# profile 配置（dsh 0.1.7+）
+#   设置存于 $DSH_HOME/profiles/<profile>/cordis.patch.yml，结构为顶层 YAML 数组：
+#     - id: llm-deepseek
+#       name: '@deepseek-ai/dsh-llm-deepseek-api-key'
+#       config:
+#         baseURL: https://api.deepseek.com/anthropic
+#   以下函数按行解析并只改动目标条目，保留文件其余内容与注释。
+# -----------------------------------------------------------------------------
+
+# dsh >= 0.1.7 起设置从 settings.yaml 迁移到 profile 的 cordis.patch.yml
+version_has_profile_settings() {
+  local v="${1%%-*}" major minor patch
+  IFS=. read -r major minor patch <<< "$v"
+  major="${major//[!0-9]/}"; minor="${minor//[!0-9]/}"; patch="${patch//[!0-9]/}"
+  [ -n "$major" ] || return 1
+  if [ "$major" -gt 0 ]; then return 0; fi
+  if [ "$minor" -gt 1 ]; then return 0; fi
+  if [ "$minor" -lt 1 ]; then return 1; fi
+  [ "${patch:-0}" -ge 7 ] && return 0
+  return 1
+}
+
+# 当前读写目标是否为 profile patch（0.1.7+）；版本未知时按文件存在性探测
+use_profile_settings() {
+  local ver=""
+  ver="$(installed_dsh_version || true)"
+  if [ -n "$ver" ]; then
+    version_has_profile_settings "$ver"
+    return $?
+  fi
+  if [ -f "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" ]; then return 0; fi
+  if [ -f "$DSH_HOME_ABS/settings.yaml" ]; then return 1; fi
+  return 0
+}
+
+# 当前 profile 设置的落盘文件（用于备份与展示）
+model_settings_document_path() {
+  if use_profile_settings; then
+    printf '%s/%s/cordis.patch.yml' "$PROFILES_DIR" "$PLUGIN_PROFILE"
+  else
+    printf '%s/settings.yaml' "$DSH_HOME_ABS"
+  fi
+}
+
+# 读取 patch 中 id: llm-deepseek 条目 config 下的键值 $2
+patch_read_llm_value() {
+  local f="$1" key="$2" sq="'"
+  [ -f "$f" ] || return 0
+  awk -v key="$key" -v sq="$sq" '
+    function indent(s,  i, c) {
+      i = 0
+      while (i < length(s)) { c = substr(s, i + 1, 1); if (c == " " || c == "\t") i++; else break }
+      return i
+    }
+    function unquote(v) {
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (length(v) >= 2) {
+        c1 = substr(v, 1, 1); c2 = substr(v, length(v), 1)
+        if (c1 == "\"" && c2 == "\"") return substr(v, 2, length(v) - 2)
+        if (c1 == sq && c2 == sq) return substr(v, 2, length(v) - 2)
+      }
+      sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      return v
+    }
+    BEGIN { item = 0; cfg = 0 }
+    {
+      line = $0
+      if (line ~ /^[ \t]*#/ || line ~ /^[ \t]*$/) next
+      ind = indent(line)
+      if (ind == 0 && substr(line, 1, 1) == "-") {
+        item = 0; cfg = 0
+        rest = line; sub(/^-[ \t]*/, "", rest)
+        if (rest ~ /^id:[ \t]*/) { sub(/^id:[ \t]*/, "", rest); if (unquote(rest) == "llm-deepseek") item = 1 }
+        next
+      }
+      if (cfg && ind <= cfgind) cfg = 0
+      if (ind <= 2 && line ~ /^[ \t]*id:[ \t]*/) {
+        v = line; sub(/^[ \t]*id:[ \t]*/, "", v)
+        if (unquote(v) == "llm-deepseek") item = 1
+        next
+      }
+      if (item && line ~ /^[ \t]*config:[ \t]*$/) { cfg = 1; cfgind = ind; next }
+      if (item && cfg && ind > cfgind) {
+        k = line; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k)
+        if (k == key) {
+          v = line; sub(/^[ \t]*[A-Za-z_][A-Za-z0-9_-]*:[ \t]*/, "", v)
+          print unquote(v)
+          exit
+        }
+      }
+    }
+  ' "$f" 2>/dev/null || true
+  return 0
+}
+
+# 写入 patch 中 id: llm-deepseek 条目的 config.baseURL（保留其余内容）
+patch_set_llm_baseurl() {
+  local f="$1" url="$2" sq="'" tmp
+  mkdir -p "$(dirname -- "$f")" 2>/dev/null || return 1
+  [ -f "$f" ] || printf '[]\n' > "$f" || return 1
+  tmp="$f.dshctl.tmp"
+  if ! awk -v url="$url" -v sq="$sq" '
+    function indent(s,  i, c) {
+      i = 0
+      while (i < length(s)) { c = substr(s, i + 1, 1); if (c == " " || c == "\t") i++; else break }
+      return i
+    }
+    function unquote(v) {
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (length(v) >= 2) {
+        c1 = substr(v, 1, 1); c2 = substr(v, length(v), 1)
+        if (c1 == "\"" && c2 == "\"") return substr(v, 2, length(v) - 2)
+        if (c1 == sq && c2 == sq) return substr(v, 2, length(v) - 2)
+      }
+      sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      return v
+    }
+    { lines[++n] = $0 }
+    END {
+      m = 0
+      for (i = 1; i <= n; i++) {
+        if (indent(lines[i]) == 0 && substr(lines[i], 1, 1) == "-") starts[++m] = i
+      }
+      starts[m + 1] = n + 1
+      target = 0
+      for (j = 1; j <= m; j++) {
+        id = ""
+        for (k = starts[j]; k < starts[j + 1]; k++) {
+          ind = indent(lines[k]); rest = lines[k]
+          if (ind == 0 && substr(rest, 1, 1) == "-") {
+            sub(/^-[ \t]*/, "", rest)
+            if (rest ~ /^id:[ \t]*/) { sub(/^id:[ \t]*/, "", rest); id = unquote(rest); break }
+          } else if (ind <= 2 && rest ~ /^[ \t]*id:[ \t]*/) {
+            sub(/^[ \t]*id:[ \t]*/, "", rest); id = unquote(rest); break
+          }
+        }
+        if (id == "llm-deepseek") { target = j; break }
+      }
+      cfg = 0; cfgind = -1; base = 0; emptyrow = 0; badinline = 0
+      if (target > 0) {
+        a = starts[target]; b = starts[target + 1] - 1
+        for (i = a; i <= b; i++) {
+          line = lines[i]; ind = indent(line)
+          if (line ~ /^[ \t]*config:[ \t]*$/) { cfg = i; cfgind = ind; continue }
+          if (line ~ /^[ \t]*config:[ \t]*\{\}[ \t]*$/) { emptyrow = i; continue }
+          if (line ~ /^[ \t]*config:[ \t]*\{/) { badinline = 1; continue }
+          if (cfg > 0 && ind > cfgind) {
+            k = line; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k)
+            if (k == "baseURL") { base = i; break }
+          }
+        }
+      }
+      if (badinline) {
+        print "dshctl: llm-deepseek 的 config 为内联写法，暂不支持自动修改" > "/dev/stderr"
+        exit 1
+      }
+      for (i = 1; i <= n; i++) {
+        if (target == 0 && lines[i] ~ /^[ \t]*\[[ \t]*\][ \t]*$/) continue
+        if (base == i) { print "    baseURL: " url; continue }
+        if (emptyrow == i) { print "  config:"; print "    baseURL: " url; continue }
+        print lines[i]
+        if (cfg == i && base == 0) print "    baseURL: " url
+        if (target > 0 && i == starts[target + 1] - 1 && cfg == 0 && emptyrow == 0) {
+          print "  config:"
+          print "    baseURL: " url
+        }
+      }
+      if (target == 0) {
+        print "- id: llm-deepseek"
+        print "  config:"
+        print "    baseURL: " url
+      }
+    }
+  ' "$f" > "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  mv -f -- "$tmp" "$f"
+}
+
+# 删除 patch 中 id: llm-deepseek 条目 config 下的键；config 变空时写为 {}
+patch_delete_llm_key() {
+  local f="$1" key="$2" sq="'" tmp
+  [ -f "$f" ] || return 0
+  tmp="$f.dshctl.tmp"
+  if ! awk -v key="$key" -v sq="$sq" '
+    function indent(s,  i, c) {
+      i = 0
+      while (i < length(s)) { c = substr(s, i + 1, 1); if (c == " " || c == "\t") i++; else break }
+      return i
+    }
+    function unquote(v) {
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (length(v) >= 2) {
+        c1 = substr(v, 1, 1); c2 = substr(v, length(v), 1)
+        if (c1 == "\"" && c2 == "\"") return substr(v, 2, length(v) - 2)
+        if (c1 == sq && c2 == sq) return substr(v, 2, length(v) - 2)
+      }
+      sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      return v
+    }
+    { lines[++n] = $0 }
+    END {
+      m = 0
+      for (i = 1; i <= n; i++) {
+        if (indent(lines[i]) == 0 && substr(lines[i], 1, 1) == "-") starts[++m] = i
+      }
+      starts[m + 1] = n + 1
+      target = 0
+      for (j = 1; j <= m; j++) {
+        id = ""
+        for (k = starts[j]; k < starts[j + 1]; k++) {
+          ind = indent(lines[k]); rest = lines[k]
+          if (ind == 0 && substr(rest, 1, 1) == "-") {
+            sub(/^-[ \t]*/, "", rest)
+            if (rest ~ /^id:[ \t]*/) { sub(/^id:[ \t]*/, "", rest); id = unquote(rest); break }
+          } else if (ind <= 2 && rest ~ /^[ \t]*id:[ \t]*/) {
+            sub(/^[ \t]*id:[ \t]*/, "", rest); id = unquote(rest); break
+          }
+        }
+        if (id == "llm-deepseek") { target = j; break }
+      }
+      cfg = 0; cfgind = -1; keyline = 0
+      if (target > 0) {
+        a = starts[target]; b = starts[target + 1] - 1
+        for (i = a; i <= b; i++) {
+          line = lines[i]; ind = indent(line)
+          if (line ~ /^[ \t]*config:[ \t]*$/) { cfg = i; cfgind = ind; continue }
+          if (cfg > 0 && ind > cfgind) {
+            k = line; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k)
+            if (k == key) { keyline = i; break }
+          }
+        }
+      }
+      if (target == 0 || cfg == 0 || keyline == 0) {
+        for (i = 1; i <= n; i++) print lines[i]
+        exit
+      }
+      remaining = 0
+      for (i = cfg + 1; i <= b; i++) {
+        if (i == keyline) continue
+        ind = indent(lines[i])
+        if (ind <= cfgind) break
+        if (lines[i] ~ /^[ \t]*#/ || lines[i] ~ /^[ \t]*$/) continue
+        remaining++
+      }
+      pad = ""
+      for (x = 0; x < cfgind; x++) pad = pad " "
+      for (i = 1; i <= n; i++) {
+        if (i == keyline) continue
+        if (i == cfg && remaining == 0) { print pad "config: {}"; continue }
+        print lines[i]
+      }
+    }
+  ' "$f" > "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  mv -f -- "$tmp" "$f"
+}
+
+# 写入 llm-deepseek.baseURL：0.1.7+ 写 profile 的 cordis.patch.yml，≤0.1.6 写 settings.yaml
 settings_write_baseurl() {
-  local url="$1" f="$DSH_HOME_ABS/settings.yaml"
+  local url="$1"
+  if use_profile_settings; then
+    patch_set_llm_baseurl "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" "$url"
+    return $?
+  fi
+  local f="$DSH_HOME_ABS/settings.yaml"
   mkdir -p "$DSH_HOME_ABS" 2>/dev/null || return 1
   if [ ! -f "$f" ]; then
     printf 'llm-deepseek:\n  baseURL: %s\n' "$url" > "$f" || return 1
@@ -3137,6 +3499,10 @@ installed_dsh_version() {
   for f in "$DSH_DIR/apps/cli/package.json" "$DSH_DIR/package.json"; do
     [ -f "$f" ] || continue
     v="$(node -e 'const j=require(process.argv[1]);process.stdout.write(j.version||"")' "$f" 2>/dev/null || true)"
+    if [ -z "$v" ]; then
+      # node 不可用或解析失败时的纯 shell 兜底（读取首个 version 字段）
+      v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" 2>/dev/null | head -n1 || true)"
+    fi
     if [ -n "$v" ]; then
       printf '%s' "$v"
       return 0
@@ -3158,9 +3524,18 @@ version_has_messages_protocol() {
   return 1
 }
 
-# 查找不合规的 Base URL 配置（输出每行: 来源|值；覆盖 settings/环境变量/.env 非法位置/补丁）
+# 查找不合规的 Base URL 配置（输出每行: 来源|值；覆盖 profile/home 配置、settings、环境变量、.env）
 model_old_root_findings() {
-  local v f hit
+  local v f lbl
+  for f in "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" "$DSH_HOME_ABS/cordis.patch.yml"; do
+    [ -f "$f" ] || continue
+    v="$(patch_read_llm_value "$f" baseURL)"
+    [ -n "$v" ] || continue
+    if [ "$f" = "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" ]; then lbl="profile 配置"; else lbl="home 配置"; fi
+    if is_old_official_root "$v"; then
+      printf '%s %s|%s\n' "$lbl" "$f" "$v"
+    fi
+  done
   v="$(read_settings_llm_value "$DSH_HOME_ABS/settings.yaml" baseURL)"
   if [ -n "$v" ] && is_old_official_root "$v"; then
     printf '设置文件 %s|%s\n' "$DSH_HOME_ABS/settings.yaml" "$v"
@@ -3169,27 +3544,40 @@ model_old_root_findings() {
     printf '环境变量 DEEPSEEK_BASE_URL|%s\n' "$DEEPSEEK_BASE_URL"
   fi
   model_illegal_env_bases
-  for f in "$DSH_HOME_ABS/cordis.patch.yml" "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml"; do
+  return 0
+}
+
+# 0.1.7+ 配置中残留的 protocol 字段（dsh 0.2.0 起为硬错误；输出 文件|值）
+model_protocol_findings() {
+  use_profile_settings || return 0
+  local f v
+  for f in "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" "$DSH_HOME_ABS/cordis.patch.yml"; do
     [ -f "$f" ] || continue
-    hit="$(grep -n "api\.deepseek\.com" "$f" 2>/dev/null | grep -v "anthropic" | head -n1 || true)"
-    [ -n "$hit" ] && printf '补丁文件 %s|%s\n' "$f" "$hit"
+    v="$(patch_read_llm_value "$f" protocol)"
+    [ -n "$v" ] || continue
+    printf '%s|%s\n' "$f" "$v"
   done
   return 0
 }
 
 model_compat_check_warn() {
-  local ver="" findings=""
+  local ver="" findings="" proto="" l
   ver="$(installed_dsh_version || true)"
   [ -n "$ver" ] || return 0
   version_has_messages_protocol "$ver" || return 0
   findings="$(model_old_root_findings)"
-  [ -n "$findings" ] || return 0
-  warn "模型配置兼容性: dsh 0.1.6+ 仅允许从 settings.yaml 或启动环境设置 Base URL；检测到以下问题："
-  local l
+  proto="$(model_protocol_findings)"
+  [ -n "$findings$proto" ] || return 0
+  warn "模型配置兼容性: Base URL 只允许来自 profile/settings 配置或启动环境（写进 .env 会被拒绝启动）；检测到以下问题："
   while IFS= read -r l; do
     [ -n "$l" ] && warn "  · $l"
   done <<< "$findings"
-  warn "可执行 dshctl --model-fix 修复（.env 非法项自动注释并备份）。"
+  if [ -n "$proto" ]; then
+    while IFS= read -r l; do
+      [ -n "$l" ] && warn "  · 配置文件 ${l%%|*} 的 protocol=${l##*|}"
+    done <<< "$proto"
+  fi
+  warn "可执行 dshctl --model-fix 修复（.env 非法项与 protocol 字段自动处理并备份）。"
   return 0
 }
 
@@ -3207,13 +3595,30 @@ do_model_show() {
     printf '  dsh 版本   : 未知（源码未安装或不可读）\n'
   fi
 
-  local sproto=""
-  sproto="$(read_settings_llm_value "$DSH_HOME_ABS/settings.yaml" protocol)"
-  if [ -n "$sproto" ]; then
-    printf '  协议覆盖   : %s（来源: 设置文件）\n' "$sproto"
-    if [ "$sproto" = "chat-completions" ]; then
-      printf '               （Chat 协议默认端点 https://api.deepseek.com；请确认 Base URL 与之匹配）\n'
+  local sproto="" spsrc=""
+  if use_profile_settings; then
+    sproto="$(patch_read_llm_value "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" protocol)"
+    [ -n "$sproto" ] && spsrc="profile 配置"
+    if [ -z "$sproto" ]; then
+      sproto="$(patch_read_llm_value "$DSH_HOME_ABS/cordis.patch.yml" protocol)"
+      [ -n "$sproto" ] && spsrc="home 配置"
     fi
+  else
+    sproto="$(read_settings_llm_value "$DSH_HOME_ABS/settings.yaml" protocol)"
+    [ -n "$sproto" ] && spsrc="设置文件"
+  fi
+  if [ -n "$sproto" ]; then
+    if use_profile_settings; then
+      printf '  协议覆盖   : %s（来源: %s）⚠ dsh 0.1.7+ 已不支持该字段，--model-fix 可清理\n' "$sproto" "$spsrc"
+    else
+      printf '  协议覆盖   : %s（来源: %s）\n' "$sproto" "$spsrc"
+      if [ "$sproto" = "chat-completions" ]; then
+        printf '               （Chat 协议默认端点 https://api.deepseek.com；请确认 Base URL 与之匹配）\n'
+      fi
+    fi
+  fi
+  if use_profile_settings; then
+    printf '  配置位置   : %s\n' "$(model_settings_document_path)"
   fi
 
   local creds="$DSH_HOME_ABS/.credentials.yaml"
@@ -3240,7 +3645,11 @@ do_model_show() {
   local bsrc="" bval="" eff_b
   eff_b="$(model_effective_base)"
   bsrc="${eff_b%%|*}"; bval="${eff_b#*|}"
-  if [ "$bsrc" = "设置文件" ]; then bsrc="设置文件 settings.yaml"; fi
+  case "$bsrc" in
+    profile配置) bsrc="profile 配置 $PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" ;;
+    home配置)    bsrc="home 配置 $DSH_HOME_ABS/cordis.patch.yml" ;;
+    设置文件)    bsrc="设置文件 $DSH_HOME_ABS/settings.yaml" ;;
+  esac
   if [ -n "$bval" ]; then
     if is_old_official_root "$bval"; then
       printf '  Base URL   : %s（来源: %s）⚠ 旧官方根地址\n' "$bval" "$bsrc"
@@ -3258,24 +3667,35 @@ do_model_show() {
       [ -n "$il" ] && warn "  ⚠ 无效配置 : ${il%%|*} 设置了 DEEPSEEK_BASE_URL=${il##*|}（dsh 0.1.6+ 会拒绝启动；--model-fix 可修复）"
     done <<< "$illegal_b"
   fi
-  printf '  Base 优先级: settings.yaml(llm-deepseek) > 启动环境变量 > 协议默认（.env 中设置会被拒绝启动）\n'
+  if use_profile_settings; then
+    printf '  Base 优先级: profile 配置 > home 配置 > 启动环境变量 > 默认（.env 中设置会被拒绝启动）\n'
+  else
+    printf '  Base 优先级: settings.yaml(llm-deepseek) > 启动环境变量 > 协议默认（.env 中设置会被拒绝启动）\n'
+  fi
   printf '  Key 优先级 : 环境变量 > 凭据文件 > 项目 .env > ~/.dsh/.env\n'
 
-  local f
+  local f doc dup e
   local -a exist_files=()
-  for f in "$DSH_HOME_ABS/settings.yaml" "$DSH_DIR/.env" "$DSH_HOME_ABS/.env" "$creds"; do
-    [ -f "$f" ] && exist_files+=("$f")
+  doc="$(model_settings_document_path)"
+  for f in "$doc" "$DSH_HOME_ABS/cordis.patch.yml" "$DSH_HOME_ABS/settings.yaml" "$DSH_DIR/.env" "$DSH_HOME_ABS/.env" "$creds"; do
+    [ -f "$f" ] || continue
+    dup=0
+    for e in ${exist_files[@]+"${exist_files[@]}"}; do
+      [ "$e" = "$f" ] && dup=1
+    done
+    [ "$dup" -eq 0 ] && exist_files+=("$f")
   done
   if [ "${#exist_files[@]}" -gt 0 ]; then
     printf '  配置文件   : %s\n' "${exist_files[*]}"
   fi
 
-  local findings=""
+  local findings="" proto=""
   findings="$(model_old_root_findings)"
-  if [ -n "$findings" ]; then
+  proto="$(model_protocol_findings)"
+  if [ -n "$findings$proto" ]; then
     printf '\n'
     if [ -n "$ver" ] && version_has_messages_protocol "$ver"; then
-      warn "检测到不合规的 Base URL 配置（0.1.6+ 仅允许 settings.yaml/启动环境）："
+      warn "检测到不合规的模型配置（0.1.6+ 仅允许 profile/settings 配置或启动环境）："
     else
       warn "检测到旧官方根地址配置（升级到 0.1.6+ 后将导致启动失败）："
     fi
@@ -3283,9 +3703,14 @@ do_model_show() {
     while IFS= read -r l; do
       [ -n "$l" ] && warn "  · $l"
     done <<< "$findings"
+    if [ -n "$proto" ]; then
+      while IFS= read -r l; do
+        [ -n "$l" ] && warn "  · 配置文件 ${l%%|*} 的 protocol=${l##*|}（0.1.7+ 已不支持）"
+      done <<< "$proto"
+    fi
     warn "可执行: dshctl --model-fix"
   else
-    ok "未发现不合规的 Base URL 配置。"
+    ok "未发现不合规的模型配置。"
   fi
 }
 
@@ -3346,17 +3771,24 @@ do_model_check() {
 
 do_model_fix() {
   local repo_env="$DSH_DIR/.env" home_env="$DSH_HOME_ABS/.env"
-  local -a fix_files=() manual=()
+  local -a fix_files=() proto_files=() manual=()
   local f val
 
-  # 可自动修复：.env 中的 DEEPSEEK_BASE_URL（任何值都非法，0.1.6+ 会拒绝启动）
+  # 可自动修复 A：.env 中的 DEEPSEEK_BASE_URL（任何值都非法，0.1.6+ 会拒绝启动）
   for f in "$repo_env" "$home_env"; do
     [ -f "$f" ] || continue
     while IFS= read -r val; do
       [ -n "$val" ] && fix_files+=("$f|$val")
     done < <(env_baseurl_values "$f")
   done
-  # 需手动：settings/环境变量中的旧官方根地址、补丁文件
+  # 可自动修复 B：0.1.7+ 配置中残留的 protocol 字段（0.2.0 会拒绝启动）
+  while IFS= read -r val; do
+    [ -n "$val" ] || continue
+    case "$val" in
+      *"|"*) proto_files+=("${val%%|*}") ;;
+    esac
+  done <<< "$(model_protocol_findings)"
+  # 需手动：环境变量与配置中的旧官方根地址（改由 --model-set-base 覆盖）
   local fl=""
   while IFS= read -r fl; do
     [ -n "$fl" ] || continue
@@ -3366,15 +3798,18 @@ do_model_fix() {
     manual+=("$fl")
   done <<< "$(model_old_root_findings)"
 
-  if [ "${#fix_files[@]}" -eq 0 ] && [ "${#manual[@]}" -eq 0 ]; then
-    ok "未发现不合规的 Base URL 配置，无需修复。"
+  if [ "${#fix_files[@]}" -eq 0 ] && [ "${#proto_files[@]}" -eq 0 ] && [ "${#manual[@]}" -eq 0 ]; then
+    ok "未发现不合规的模型配置，无需修复。"
     return 0
   fi
 
-  step "Base URL 配置修复"
+  step "模型配置修复"
   local item
   for item in ${fix_files[@]+"${fix_files[@]}"}; do
     printf '  将修复   : %s（当前值: %s；注释后 dsh 可正常启动）\n' "${item%%|*}" "${item##*|}"
+  done
+  for item in ${proto_files[@]+"${proto_files[@]}"}; do
+    printf '  将修复   : %s（移除 protocol 字段，0.1.7+ 已不再支持）\n' "$item"
   done
   for item in ${manual[@]+"${manual[@]}"}; do
     printf '  需手动   : %s（当前值: %s）\n' "${item%%|*}" "${item##*|}"
@@ -3385,18 +3820,17 @@ do_model_fix() {
     return 0
   fi
 
-  if [ "${#fix_files[@]}" -gt 0 ]; then
-    if ! confirm_config_change "确认注释 .env 中的 DEEPSEEK_BASE_URL（修改前自动备份）？"; then
+  if [ "${#fix_files[@]}" -gt 0 ] || [ "${#proto_files[@]}" -gt 0 ]; then
+    if ! confirm_config_change "确认修复上述配置（修改前自动备份）？"; then
       die "已取消（未修改配置）。"
     fi
-    local ts
+    local ts old_bak
     ts="$(date +%Y%m%d-%H%M%S)"
     for item in ${fix_files[@]+"${fix_files[@]}"}; do
       f="${item%%|*}"; val="${item##*|}"
       cp -a -- "$f" "$f.bak.$ts" 2>/dev/null || die "备份失败: $f"
       env_comment_baseurl "$f" || die "修改失败: $f"
       ok "已修复: ${f}（备份: $f.bak.${ts}）"
-      local old_bak
       while IFS= read -r old_bak; do
         rm -f -- "$old_bak" 2>/dev/null || true
       done < <(ls -1t "$f".bak.* 2>/dev/null | tail -n +4)
@@ -3404,8 +3838,20 @@ do_model_fix() {
         info "原值 $val 如仍需使用，请写入合法位置: dshctl --model-set-base $val"
       fi
     done
-    info "提示：Base URL 的合法位置是 settings.yaml（llm-deepseek.baseURL）或启动环境变量；"
-    info "      写入 settings.yaml 可用: dshctl --model-set-base <地址>"
+    for item in ${proto_files[@]+"${proto_files[@]}"}; do
+      [ -f "$item" ] || continue
+      cp -a -- "$item" "$item.bak.$ts" 2>/dev/null || die "备份失败: $item"
+      patch_delete_llm_key "$item" protocol || die "修改失败: $item"
+      ok "已移除 protocol 字段: ${item}（备份: $item.bak.${ts}）"
+      while IFS= read -r old_bak; do
+        rm -f -- "$old_bak" 2>/dev/null || true
+      done < <(ls -1t "$item".bak.* 2>/dev/null | tail -n +4)
+    done
+    if use_profile_settings; then
+      info "提示：Base URL 的合法位置是 profile 配置（cordis.patch.yml，可用 dshctl --model-set-base 写入）或启动环境变量；"
+    else
+      info "提示：Base URL 的合法位置是 settings.yaml（llm-deepseek.baseURL）或启动环境变量；"
+    fi
     info "修复后建议: dshctl --model-check"
   fi
   if [ "${#manual[@]}" -gt 0 ]; then
@@ -3416,18 +3862,19 @@ do_model_fix() {
       case "${item%%|*}" in
         设置文件*) settings_hit=1 ;;
         环境变量*) env_hit=1 ;;
-        补丁文件*) patch_hit=1 ;;
+        *配置*)    patch_hit=1 ;;
       esac
     done
     if [ "$settings_hit" -eq 1 ]; then
       warn "  → 设置文件：可执行 dshctl --model-set-base https://api.deepseek.com/anthropic 覆盖；"
-      warn "     或在 Web UI「设置 → 模型 → DeepSeek 卡片」中修改/清空（dsh 热读取，无需重启）。"
+      warn "     或在 Web UI「设置 → 模型 → DeepSeek 卡片」中修改/清空。"
     fi
     if [ "$env_hit" -eq 1 ]; then
       warn "  → 环境变量：请在 shell 配置中移除（unset DEEPSEEK_BASE_URL）。"
     fi
     if [ "$patch_hit" -eq 1 ]; then
-      warn "  → 补丁文件：请编辑对应 cordis.patch.yml 中的 api.deepseek.com 引用（改为 .../anthropic 或移除）。"
+      warn "  → profile/home 配置：可执行 dshctl --model-set-base https://api.deepseek.com/anthropic 覆盖；"
+      warn "     或编辑 cordis.patch.yml 中 llm-deepseek 的 config.baseURL。"
     fi
   fi
   return 0
@@ -3604,7 +4051,7 @@ do_data_restore() {
 }
 
 do_data_archive_sessions() {
-  step "归档旧会话（解决升级后会话不兼容）"
+  step "归档旧会话（软重置；一般无需执行）"
   local sess="$DSH_HOME_ABS/sessions"
   if [ ! -d "$sess" ] || [ -z "$(ls -A "$sess" 2>/dev/null)" ]; then
     info "会话目录为空或不存在（${sess}），无需归档。"
@@ -3614,6 +4061,7 @@ do_data_archive_sessions() {
   ts="$(date +%Y%m%d-%H%M%S)"
   dest="$DSH_HOME_ABS/sessions-archive-$ts"
   warn "将把 $sess 整体移动到: ${dest}（数据不删除，可手动移回）"
+  info "提示：dsh 0.1.7+ 会自动迁移设置，0.2.0 起会话格式自动升级（旧会话按需保留后继），通常无需本操作。"
   warn "注意：dsh 的会话/归档列表可能残留失效条目，可在 Web UI「设置 → 已归档会话」中清理。"
   if [ "$DRY_RUN" -eq 1 ]; then
     info "[dry-run] 以上为预览，未做任何改动。"
@@ -3749,6 +4197,7 @@ do_rollback_prepare() {
   short="$(git -C "$DSH_DIR" rev-parse --short "$target" 2>/dev/null || true)"
   info "回退目标: $target${short:+（本地已有提交 ${short}）}"
   warn "注意：回退只改源码版本，不会回滚 ~/.dsh 运行数据；新版本写入的数据可能与旧版本不兼容。"
+  warn "      尤其是 0.1.7+ 已把设置迁移为 profile 配置、0.2.0 会话为 v4 格式，回退后旧版本可能无法使用。"
   warn "      建议先执行: dshctl --data-backup"
   if ! confirm_config_change "确认回退到该版本并重新构建？"; then
     die "已取消回退。"
@@ -3793,7 +4242,10 @@ backup_globs() {
     "$HOME/dshctl-backup-*.tar.gz" \
     "$HOME/dshctl-preupgrade-*.tar.gz" \
     "$DSH_DIR/.env.bak.*" \
-    "$DSH_HOME_ABS/.env.bak.*"
+    "$DSH_HOME_ABS/.env.bak.*" \
+    "$DSH_HOME_ABS/settings.yaml.bak.*" \
+    "$DSH_HOME_ABS/cordis.patch.yml.bak.*" \
+    "$PROFILES_DIR"/*/cordis.patch.yml.bak.*
 }
 
 do_backups_list() {
@@ -3850,10 +4302,17 @@ do_backups_prune() {
   return 0
 }
 
-model_effective_base() { # 输出: 来源|值（真实优先级: settings.yaml > 启动环境变量 > 协议默认；.env 为非法位置）
+model_effective_base() { # 输出: 来源|值（0.1.7+: home 配置 > profile 配置；≤0.1.6: settings.yaml；再启动环境变量；.env 为非法位置）
   local v=""
-  v="$(read_settings_llm_value "$DSH_HOME_ABS/settings.yaml" baseURL)"
-  if [ -n "$v" ]; then printf '设置文件|%s' "$v"; return 0; fi
+  if use_profile_settings; then
+    v="$(patch_read_llm_value "$DSH_HOME_ABS/cordis.patch.yml" baseURL)"
+    if [ -n "$v" ]; then printf 'home配置|%s' "$v"; return 0; fi
+    v="$(patch_read_llm_value "$PROFILES_DIR/$PLUGIN_PROFILE/cordis.patch.yml" baseURL)"
+    if [ -n "$v" ]; then printf 'profile配置|%s' "$v"; return 0; fi
+  else
+    v="$(read_settings_llm_value "$DSH_HOME_ABS/settings.yaml" baseURL)"
+    if [ -n "$v" ]; then printf '设置文件|%s' "$v"; return 0; fi
+  fi
   if [ -n "${DEEPSEEK_BASE_URL:-}" ]; then printf '环境变量|%s' "$DEEPSEEK_BASE_URL"; return 0; fi
   printf '默认|'
   return 0
@@ -3868,14 +4327,20 @@ do_model_set_base() {
   case "$url" in *'#'*) die "地址包含 # 字符，暂不支持。" ;; esac
   [ -d "$DSH_DIR" ] || die "源码目录不存在: ${DSH_DIR}（请先 --install）"
 
-  local eff src cur
+  local eff src cur doc loc_note
   eff="$(model_effective_base)"
   src="${eff%%|*}"; cur="${eff#*|}"
+  doc="$(model_settings_document_path)"
   printf '  当前地址   : %s（来源: %s）\n' "${cur:-未配置}" "$src"
   printf '  目标地址   : %s\n' "$url"
-  printf '  写入位置   : %s/settings.yaml（llm-deepseek.baseURL；dsh 热读取，无需重启）\n' "$DSH_HOME_DISPLAY"
+  if use_profile_settings; then
+    loc_note="profile 配置（llm-deepseek.config.baseURL；dsh 热加载，未生效可重启服务）"
+  else
+    loc_note="settings.yaml（llm-deepseek.baseURL；dsh 热读取，无需重启）"
+  fi
+  printf '  写入位置   : %s — %s\n' "$doc" "$loc_note"
   if [ "$src" = "环境变量" ]; then
-    warn "注意: settings.yaml 的显式值优先级高于环境变量；如需取消环境变量请从 shell 配置移除。"
+    warn "注意: 配置文件中的显式值优先级高于环境变量；如需取消环境变量请从 shell 配置移除。"
   fi
   local illegal=""
   illegal="$(model_illegal_env_bases)"
@@ -3890,19 +4355,18 @@ do_model_set_base() {
     info "[dry-run] 以上为预览，未做任何改动。"
     return 0
   fi
-  if ! confirm_config_change "确认写入 settings.yaml（并清理 .env 非法项）？"; then
+  if ! confirm_config_change "确认写入 ${doc}（并清理 .env 非法项）？"; then
     die "已取消。"
   fi
 
   local ts
   ts="$(date +%Y%m%d-%H%M%S)"
-  local settings_file="$DSH_HOME_ABS/settings.yaml"
-  if [ -f "$settings_file" ]; then
-    cp -a -- "$settings_file" "$settings_file.bak.$ts" || die "备份失败: $settings_file"
-    info "已备份: $settings_file.bak.$ts"
+  if [ -f "$doc" ]; then
+    cp -a -- "$doc" "$doc.bak.$ts" || die "备份失败: $doc"
+    info "已备份: $doc.bak.$ts"
   fi
-  settings_write_baseurl "$url" || die "写入 settings.yaml 失败。"
-  ok "已写入 settings.yaml: llm-deepseek.baseURL=$url"
+  settings_write_baseurl "$url" || die "写入 ${doc} 失败。"
+  ok "已写入 ${doc}: llm-deepseek.baseURL=$url"
 
   local f v
   for f in "$DSH_DIR/.env" "$DSH_HOME_ABS/.env"; do
@@ -3920,12 +4384,16 @@ do_model_set_base() {
   local old_bak
   while IFS= read -r old_bak; do
     rm -f -- "$old_bak" 2>/dev/null || true
-  done < <(ls -1t "$settings_file".bak.* 2>/dev/null | tail -n +4)
+  done < <(ls -1t "$doc".bak.* 2>/dev/null | tail -n +4)
   while IFS= read -r old_bak; do
     rm -f -- "$old_bak" 2>/dev/null || true
   done < <(ls -1t "$DSH_DIR/.env".bak.* "$DSH_HOME_ABS/.env".bak.* 2>/dev/null | tail -n +4)
 
-  info "settings.yaml 变更会被 dsh 热读取（下一次请求生效）；验证: dshctl --model-check"
+  if use_profile_settings; then
+    info "profile 配置变更会被 dsh 热加载（下一次请求生效；未生效可 dshctl --restart）；验证: dshctl --model-check"
+  else
+    info "settings.yaml 变更会被 dsh 热读取（下一次请求生效）；验证: dshctl --model-check"
+  fi
   return 0
 }
 
@@ -4069,7 +4537,7 @@ main() {
   fi
   if [ -n "$PLUGIN_ACTION" ]; then
     case "$PLUGIN_ACTION" in
-      add|remove|update|repair|policy-set|policy-reset) acquire_lock ;;
+      add|remove|update|repair|policy-set|policy-reset|allow-version|revoke-version) acquire_lock ;;
     esac
     do_plugin_action
     return 0

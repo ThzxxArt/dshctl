@@ -35,6 +35,7 @@ setup() {
     ln -s "$DSH_TEST_BASH" "$FAKE_BIN/bash"
   fi
   make_stub "$FAKE_BIN/node" '#!/usr/bin/env bash
+if [ "${1:-}" = "-e" ] || [ "${1:-}" = "-p" ]; then exit 1; fi
 echo "v24.19.0"'
   make_stub "$FAKE_BIN/pnpm" '#!/usr/bin/env bash
 echo "11.7.0"'

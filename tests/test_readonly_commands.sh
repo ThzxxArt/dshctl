@@ -38,4 +38,8 @@ run_dshctl --plugin-list
 assert_rc 0 "未初始化 profile 时 --plugin-list 正常提示"
 assert_stdout_contains "profile 未初始化" "profile 未初始化提示"
 
+run_dshctl --model-show
+assert_rc 0 "空环境下 --model-show 退出码为 0"
+assert_stdout_contains "模型配置总览" "模型配置总览输出"
+
 finish
