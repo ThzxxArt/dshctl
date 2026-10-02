@@ -40,8 +40,8 @@ dshctl 把这些收敛为一条命令，并且刻意做成**可反复执行**的
 - **增量与安全**：源码未变化自动跳过 install/build；升级前自动备份 `~/.dsh`；
   所有破坏性操作需确认，均支持 `--dry-run` 预览。
 - **运维闭环**：`--status` / `--doctor` / `--start|--stop|--restart|--logs`，可选 `systemd --user` 常驻。
-- **插件管理**：profile 级增删改查，pnpm 11 供应链策略（`minimumReleaseAge`）的审计、等待时间预估与锁文件重建。
-- **模型排障**：针对 dsh 0.1.6+ 的 Messages 协议变化，检查/修复非法的 `DEEPSEEK_BASE_URL` 配置。
+- **插件管理**：profile 级增删改查，pnpm 11 供应链策略（`minimumReleaseAge`）的审计、等待时间预估与锁文件重建；支持 dsh 0.2.0+ 的插件兼容性门禁（精确版本豁免的查询/授予/撤销）。
+- **模型排障**：针对 dsh 0.1.6+ 的 Messages 协议变化，检查/修复非法的 `DEEPSEEK_BASE_URL`；适配 0.1.7+ 的配置迁移（profile 的 `cordis.patch.yml`）。
 - **数据维护**：备份、恢复、旧会话归档、可重建缓存清理，全部带自动备份。
 - **版本管理**：升级检查、一键回退到上一次成功安装的版本、备份清单与保留策略。
 - **可脚本化**：`-y` 全自动模式，非交互环境行为明确；退出码与日志（`~/.dshctl.log`）可被 CI/运维系统消费。
@@ -105,9 +105,10 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | 安装 | `--install` | 安装 / 更新（`--dir` `--ref` `--shallow` `--clean` `--force-update`） |
 | 状态 | `--status` `--doctor` | 安装/服务/端口状态；环境与网络体检（只读） |
 | 服务 | `--start` `--stop` `--restart` `--logs` | 前台/后台服务控制，`--logs --last N` 看最近日志 |
-| 插件 | `--plugin-list` / `--plugin-add` / `--plugin-remove` / `--plugin-update` | profile 级插件管理（默认 `web`，可 `--profile`） |
+| 插件 | `--plugin-list` / `--plugin-add` / `--plugin-remove` / `--plugin-update` / `--plugin-why` | profile 级插件管理（默认 `web`，可 `--profile`） |
 | 插件策略 | `--plugin-repair` `--plugin-policy` `--plugin-policy-set N` `--plugin-policy-reset` | pnpm `minimumReleaseAge` 拦截排障 |
-| 模型 | `--model-show` `--model-check` `--model-fix` `--model-set-base URL` | 0.1.6+ Base URL 规范检查与修复 |
+| 插件豁免 | `--plugin-exemptions` / `--plugin-allow SPEC` / `--plugin-revoke SPEC` | dsh 0.2.0+ 插件兼容性门禁的豁免管理 |
+| 模型 | `--model-show` `--model-check` `--model-fix` `--model-set-base URL` | Base URL 规范检查与修复（0.1.7+ 配置在 profile） |
 | 数据 | `--data-backup` `--data-restore FILE` `--data-archive-sessions` `--data-prune` | 备份 / 恢复 / 旧会话归档 / 缓存清理 |
 | 版本 | `--rollback [REF]` `--upgrade-check` | 回退与升级检查 |
 | 访问 | `--url` `--web-lan` `--trusted-host HOST` | 打印带 token 的地址；局域网访问 |
@@ -131,7 +132,7 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | `DSH_PNPM_FALLBACK` | `11.7.0` | 无法从仓库读取 pnpm 版本时的兜底 |
 | `DSH_HOME` | `~/.dsh` | dsh 运行数据目录 |
 | `DSH_PORT` / `DSH_HOST` | `3080` / `127.0.0.1` | Web UI 监听 |
-| `DSH_API_KEY` / `DSH_BASE_URL` | 空 | 写入 `.env` / `settings.yaml` |
+| `DSH_API_KEY` / `DSH_BASE_URL` | 空 | 写入 `.env` / profile 配置（0.1.6 及以下为 `settings.yaml`） |
 | `DSH_GIT_PROXY` / `GIT_PROXY` | 空 | HTTP 代理（也读取 `https_proxy`） |
 | `DSH_GITHUB_MIRROR` | 空 | GitHub 镜像加速 |
 | `DSH_NPM_MIRROR` / `DSH_NODE_MIRROR` | 空 | 留空则自动探测 |
@@ -145,6 +146,8 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | `~/.local/bin/dsh` | dsh 启动器（由 dshctl 生成） |
 | `~/.local/bin/dshctl` | 全局命令软链（`--register` 后） |
 | `~/.dsh` | dsh 运行数据：会话 / 凭据 / 设置 / 插件 profile |
+| `~/.dsh/profiles/<profile>/cordis.patch.yml` | profile 配置（dsh 0.1.7+ 起设置与模型地址的落盘位置） |
+| `~/.dsh/settings.yaml` | 旧版全局设置（≤0.1.6；升级到 0.1.7+ 时自动导入并改名为 `.imported`） |
 | `~/.local/state/dsh` | 服务状态：`web.pid` `web.log` `port` 安装版本记录 |
 | `~/.dshctl.log` | dshctl 操作日志（轮转保留 `.1`） |
 | `~/.local/share/dsh/web-lan.patch.yml` | 局域网访问补丁（`--web-lan` 时生成） |
@@ -163,9 +166,10 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 ## 常见问题
 
 - 安装失败 / GitHub 或 npm 不可达 → [docs/troubleshooting.md](docs/troubleshooting.md)
-- 升级后旧会话发不出消息 → `dshctl --data-archive-sessions`
+- 升级后旧会话发不出消息 → 0.2.0 起会自动迁移，一般无需操作；必要时 `dshctl --data-archive-sessions`
 - dsh 启动报 `.env` 中的 `DEEPSEEK_BASE_URL` 非法 → `dshctl --model-fix`
 - 插件安装被 pnpm 供应链策略拦截 → `dshctl --plugin-policy` / `--plugin-repair`
+- 插件与 dsh 版本不兼容（0.2.0+）→ `dshctl --plugin-exemptions` / `--plugin-allow`
 - 端口被占用（WSL 镜像网络下可能是主机/其他发行版）→ `dshctl --doctor` 或 `--port`
 
 ## 开发与贡献

@@ -44,8 +44,8 @@ dshctl/
 | 集成 | `install_launcher` `install_systemd` `headless_selfcheck` | 启动器 ~65 行；systemd 单元生成 |
 | 卸载 | `do_uninstall` | `--purge` 先列清单、再确认、最后删除；自动备份数据 |
 | 运维 | `do_status` `do_doctor` `service_mode` `service_ctl_pid` `do_service_action` | systemd 与后台进程双模式 |
-| 插件 | `resolve_plugin_spec` `plugin_run` `do_plugin_*` `plugin_failure_hint` | profile 级管理；策略违规等待时间精确计算 |
-| 模型 | `mask_secret` `settings_write_baseurl` `model_*` `do_model_*` | 0.1.6+ 协议兼容检查与修复 |
+| 插件 | `resolve_plugin_spec` `plugin_run` `do_plugin_*` `plugin_failure_hint` | profile 级管理；策略违规等待时间精确计算；0.2.0+ 兼容性豁免（exemptions / allow / revoke） |
+| 模型 | `mask_secret` `settings_write_baseurl` `patch_read_llm_value` `patch_set_llm_baseurl` `patch_delete_llm_key` `use_profile_settings` `model_*` `do_model_*` | 0.1.7+ 配置位于 profile 的 `cordis.patch.yml`，≤0.1.6 为 `settings.yaml`；协议兼容检查与修复 |
 | 数据 | `do_data_backup` `do_data_restore` `do_data_archive_sessions` `do_data_prune` | 破坏性操作全部带确认与现状备份 |
 | 版本 | `version_ge` `do_upgrade_check` `rollback_prev_target` `do_rollback_prepare` | 基于 `installed.history` 的历史回退 |
 | 访问/备份 | `do_url` `backup_globs` `do_backups_list` `do_backups_prune` | 备份保留策略 |

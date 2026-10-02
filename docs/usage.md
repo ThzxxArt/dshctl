@@ -120,20 +120,44 @@ bash dshctl.sh --plugin-policy-reset     # 恢复 pnpm 默认（1440 分钟）
 
 策略配置写在 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`。
 
+### 插件兼容性门禁（dsh 0.2.0+）
+
+dsh 0.2.0 起会按插件的 `peerDependencies` 校验 dsh 版本：不兼容的安装会被拒绝并回滚，
+已安装但未豁免的插件会被启动拒载。dshctl 提供对应的豁免管理：
+
+```bash
+bash dshctl.sh --plugin-exemptions                  # 查看当前精确版本豁免（JSON）
+bash dshctl.sh --plugin-allow pkg@1.2.3             # 授予豁免（使用已装 dsh 版本；需确认风险）
+bash dshctl.sh --plugin-revoke pkg@1.2.3            # 撤销豁免
+```
+
+豁免是「精确包名@版本 + 精确 dsh 版本」级别的，记录在
+`~/.dsh/profiles/<profile>/compatibility.json`。授予豁免意味着接受崩溃或数据损坏风险，
+更推荐先尝试安装与该 dsh 版本兼容的插件版本。这与 `minimumReleaseAge`（发布年龄冷静期）
+是两个不同的机制。
+
 ## 5. 模型配置维护
 
 dsh 0.1.6 起默认使用 Messages 协议，且**不允许**把 `DEEPSEEK_BASE_URL` 写在 `.env`
-（会导致拒绝启动）；Base URL 的合法位置是 `~/.dsh/settings.yaml` 或启动环境变量。
+（会导致拒绝启动）。Base URL 的合法位置随版本变化：
+
+- **dsh 0.1.7+**：profile 配置 `~/.dsh/profiles/<profile>/cordis.patch.yml` 中
+  `llm-deepseek` 条目的 `config.baseURL`；
+- **≤0.1.6**：`~/.dsh/settings.yaml` 的 `llm-deepseek.baseURL`（升级到 0.1.7+ 时会被自动
+  导入 profile 并改名为 `settings.yaml.imported`）。
 
 ```bash
 bash dshctl.sh --model-show                            # key 脱敏、来源标注、合规性检查
 bash dshctl.sh --model-check                           # headless 发一条最小消息验证连通
-bash dshctl.sh --model-fix                             # 注释 .env 中的非法项（自动备份）
+bash dshctl.sh --model-fix                             # 注释 .env 非法项；移除 0.1.7+ 的 protocol 字段
 bash dshctl.sh --model-set-base https://api.deepseek.com/anthropic
+bash dshctl.sh --profile work --model-show             # 指定其他 profile
 ```
 
 官方 Messages 端点为 `https://api.deepseek.com/anthropic`；第三方网关请填写其
-Anthropic 兼容地址。`settings.yaml` 变更会被 dsh 热读取，无需重启。
+Anthropic 兼容地址。`settings.yaml` 会被 dsh 热读取；profile 配置由 dsh 热加载，未生效时
+可 `dshctl --restart`。另外，`protocol` 字段在 0.1.7+ 已不再支持、0.2.0 会拒绝启动，
+`--model-fix` 可自动移除。
 
 ## 6. 数据维护
 
@@ -147,6 +171,8 @@ bash dshctl.sh --data-prune               # 清理可重建的图片请求缓存
 ```
 
 升级前后建议先 `--data-backup`。恢复不会删除归档数据，只覆盖当前 `~/.dsh`。
+dsh 0.1.7+ 会自动迁移旧 `settings.yaml`，0.2.0 起会话格式也会自动升级（旧会话按需保留
+后继），因此 `--data-archive-sessions` 通常只用于需要彻底软重置的场景。
 
 ## 7. 版本管理与回退
 
@@ -156,8 +182,10 @@ bash dshctl.sh --rollback         # 回退到上一次成功安装的版本并�
 bash dshctl.sh --rollback v0.1.2-alpha.1
 ```
 
-回退只改变源码版本，**不会**回滚 `~/.dsh` 运行数据；新版本写入的数据可能与旧版本不兼容，
-执行前请先备份。安装历史记录保存在 `~/.local/state/dsh/installed.history`（最近 5 条）。
+回退只改变源码版本，**不会**回滚 `~/.dsh` 运行数据；新版本写入的数据可能与旧版本不兼容。
+尤其注意：0.1.7+ 已把设置迁移为 profile 配置、0.2.0 会话为 v4 格式，回退后旧版本可能
+无法使用，执行前请先 `--data-backup`。安装历史记录保存在
+`~/.local/state/dsh/installed.history`（最近 5 条）。
 
 ## 8. 备份管理
 

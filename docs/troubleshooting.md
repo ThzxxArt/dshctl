@@ -76,8 +76,16 @@ dsh 0.1.6+ 拒绝从 `.env` 读取 Base URL。修复：
 
 ```bash
 bash dshctl.sh --model-fix      # 注释 .env 中的非法行（自动备份）
-bash dshctl.sh --model-set-base https://api.deepseek.com/anthropic   # 写入 settings.yaml
+bash dshctl.sh --model-set-base https://api.deepseek.com/anthropic
 ```
+
+### 模型地址写到哪里（0.1.7+ 配置迁移）
+
+dsh 0.1.7 起设置从 `~/.dsh/settings.yaml` 迁移到
+`~/.dsh/profiles/<profile>/cordis.patch.yml`；旧文件会在首次启动时被自动导入并改名
+`settings.yaml.imported`（内容保留）。用 `dshctl --model-show` 可看到实际来源与优先级
+（home 配置 > profile 配置 > 启动环境变量）。`protocol` 字段在 0.1.7+ 已不支持，
+`dshctl --model-fix` 可自动移除。
 
 ### 模型自检失败（404 / 401 / 超时）
 
@@ -92,7 +100,8 @@ bash dshctl.sh --model-check    # headless 发一条最小消息
 
 ### 升级后旧会话发不出消息
 
-新旧版本会话数据不兼容，软重置（数据保留，可手动移回）：
+dsh 0.2.0 起会按需自动迁移会话格式（v4），旧会话一般可直接打开；若仍异常，可做软重置
+（数据保留，可手动移回）：
 
 ```bash
 bash dshctl.sh --stop
@@ -134,6 +143,20 @@ bash dshctl.sh --plugin-policy-set 0
 ### 提示 `allowBuilds` 拦截（插件含构建脚本）
 
 按输出提示把对应的 key 加入 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml` 后重试。
+
+### 插件与 dsh 版本不兼容（0.2.0+）
+
+表现为 `installation rejected: ... is incompatible with dsh ... peerDependencies`，
+安装会被回滚；已安装但未豁免的插件会在启动时被拒载（`--doctor` 可检测）。
+
+```bash
+bash dshctl.sh --plugin-exemptions            # 查看当前豁免
+bash dshctl.sh --plugin-allow pkg@1.2.3      # 确认风险后授予（会用当前 dsh 版本）
+bash dshctl.sh --plugin-revoke pkg@1.2.3     # 撤销
+```
+
+优先选择安装与该 dsh 版本兼容的插件版本；豁免是精确到「包@版本 + dsh 版本」的，
+授予后可能崩溃或损坏数据。它与 `minimumReleaseAge` 是不同机制。
 
 ### 卸载插件提示包名不存在
 

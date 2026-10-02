@@ -32,8 +32,10 @@ dshctl --status / --doctor / --restart / --logs
   backs up `~/.dsh` before upgrades, prints the failing line on errors.
 - China-network friendly: proxy auto-detection, GitHub mirror, npm/Node mirror fallback.
 - Operations: `--status`, `--doctor`, `--start|--stop|--restart|--logs`, optional `systemd --user`.
-- Plugin management per profile, including pnpm `minimumReleaseAge` policy audit and lockfile repair.
-- Model config checks/fixes for the dsh 0.1.6+ Messages protocol (Base URL must not be in `.env`).
+- Plugin management per profile, including pnpm `minimumReleaseAge` policy audit, lockfile
+  repair, and the dsh 0.2.0+ plugin compatibility gate (exact-version exemption management).
+- Model config checks/fixes for the dsh 0.1.6+ Messages protocol (Base URL must not be in `.env`),
+  with dsh 0.1.7+ settings stored in the profile's `cordis.patch.yml`.
 - Data maintenance: backup/restore/session archive/cache prune, all destructive actions confirmed
   and `--dry-run` previewable.
 - Uninstall: partial (`--uninstall`) or full (`--purge`, with automatic data backup).
@@ -75,6 +77,7 @@ bash dshctl.sh --purge -y         # full cleanup (backs up ~/.dsh first)
 | Service | `--start`, `--stop`, `--restart`, `--logs [--last N]` |
 | Plugins | `--plugin-list/add/remove/update/why/repair` |
 | Plugin policy | `--plugin-policy`, `--plugin-policy-set N`, `--plugin-policy-reset` |
+| Plugin exemptions | `--plugin-exemptions`, `--plugin-allow SPEC`, `--plugin-revoke SPEC` (dsh 0.2.0+) |
 | Model | `--model-show`, `--model-check`, `--model-fix`, `--model-set-base URL` |
 | Data | `--data-backup`, `--data-restore FILE`, `--data-archive-sessions`, `--data-prune` |
 | Versions | `--rollback [REF]`, `--upgrade-check`, `--backups-list`, `--backups-prune [N]` |
