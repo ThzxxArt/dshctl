@@ -3468,10 +3468,14 @@ env_baseurl_values() {
 
 # 注释 .env 文件中所有未注释的 DEEPSEEK_BASE_URL 行（调用方负责备份）
 env_comment_baseurl() {
-  local f="$1"
+  local f="$1" tmp
   [ -f "$f" ] || return 0
-  sed -i -E 's~^([[:space:]]*)(DEEPSEEK_BASE_URL=.*)$~\1# \2~' "$f" || return 1
-  return 0
+  tmp="$f.dshctl.tmp"
+  if ! sed -E 's~^([[:space:]]*)(DEEPSEEK_BASE_URL=.*)$~\1# \2~' "$f" > "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  mv -f -- "$tmp" "$f"
 }
 
 # 输出 .env 中的非法 base 配置（每行: 非法位置 <文件>|值）

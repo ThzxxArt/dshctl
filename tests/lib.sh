@@ -84,6 +84,10 @@ assert_rc() {
     _pass "${desc}（rc=${LAST_RC}）"
   else
     _fail "${desc}：期望 rc=${expected}，实际 rc=$LAST_RC"
+    if [ -f "$OUT_FILE" ]; then
+      printf '# 最近输出:\n' >&2
+      tail -n 8 -- "$OUT_FILE" >&2
+    fi
   fi
 }
 
