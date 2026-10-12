@@ -9,7 +9,7 @@ trap teardown EXIT
 setup
 
 # 预置一个"源码目录"用于验证 dry-run 不会删除任何东西
-mkdir -p "$TEST_HOME/deepseek-harness"
+mkdir -p "$TEST_HOME/deepseek-harness/.git"
 printf 'do not delete\n' > "$TEST_HOME/deepseek-harness/keep.txt"
 
 run_dshctl --dry-run
@@ -21,6 +21,13 @@ assert_stdout_contains "dry-run 结束" "明确提示未做改动"
 run_dshctl --install --dry-run
 assert_rc 0 "--install --dry-run 退出码为 0"
 assert_stdout_contains "安装计划预览" "安装预览输出"
+
+run_dshctl --install --dry-run --clean-build
+assert_rc 0 "--clean-build --dry-run 退出码为 0"
+assert_stdout_contains "pnpm run clean" "dry-run 展示清理构建产物"
+
+# 构建失败指引的静态存在性（真实构建失败需要完整仓库，此处仅防回归删除）
+assert_command "脚本包含构建失败指引" grep -qF "dshctl --install --clean-build" "$DSHCTL"
 
 run_dshctl --purge --dry-run
 assert_rc 0 "--purge --dry-run 退出码为 0"

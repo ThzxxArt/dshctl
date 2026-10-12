@@ -28,6 +28,12 @@ bash dshctl.sh --install --typecheck
 # 强制重装依赖并重建（忽略"源码未变化"的智能跳过）
 bash dshctl.sh --install --rebuild
 
+# 更新后构建失败（如 MISSING_EXPORT，多为残留旧构建产物 lib/）：
+# 先运行 pnpm run clean 清理产物再重建（隐含 --rebuild）
+bash dshctl.sh --install --clean-build
+# 若更新曾被本地修改阻塞，更新与清理可组合：
+bash dshctl.sh --install --force-update --clean-build
+
 # 更新时丢弃本地源码修改（未跟踪文件保留）
 bash dshctl.sh --install --force-update
 

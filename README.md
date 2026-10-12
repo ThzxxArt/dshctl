@@ -102,7 +102,7 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 
 | 类别 | 命令 | 说明 |
 | --- | --- | --- |
-| 安装 | `--install` | 安装 / 更新（`--dir` `--ref` `--shallow` `--clean` `--force-update`） |
+| 安装 | `--install` | 安装 / 更新（`--dir` `--ref` `--shallow` `--clean` `--force-update` `--clean-build`） |
 | 状态 | `--status` `--doctor` | 安装/服务/端口状态；环境与网络体检（只读） |
 | 服务 | `--start` `--stop` `--restart` `--logs` | 前台/后台服务控制，`--logs --last N` 看最近日志 |
 | 插件 | `--plugin-list` / `--plugin-add` / `--plugin-remove` / `--plugin-update` / `--plugin-why` | profile 级插件管理（默认 `web`，可 `--profile`） |

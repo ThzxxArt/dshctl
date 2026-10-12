@@ -72,7 +72,7 @@ bash dshctl.sh --purge -y         # full cleanup (backs up ~/.dsh first)
 
 | Area | Commands |
 | --- | --- |
-| Install | `--install` (`--dir` `--ref` `--shallow` `--clean` `--force-update`) |
+| Install | `--install` (`--dir` `--ref` `--shallow` `--clean` `--force-update` `--clean-build`) |
 | Inspect | `--status`, `--doctor` |
 | Service | `--start`, `--stop`, `--restart`, `--logs [--last N]` |
 | Plugins | `--plugin-list/add/remove/update/why/repair` |

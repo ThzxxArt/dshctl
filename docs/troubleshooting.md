@@ -68,6 +68,22 @@ corepack enable && corepack prepare pnpm@<版本> --activate
 `pnpm install` 的 postinstall 会配置 Git 钩子；缓存还原时可能被跳过，脚本会重试一次，
 失败仅告警，不影响运行（只影响提交期检查）。
 
+### 构建失败（MISSING_EXPORT / 更新后产物不一致）
+
+症状：`pnpm run build` 报 `[MISSING_EXPORT] ... is not exported by ...`，或类似
+`Build failed with`。常见原因是**更新源码后残留了旧的构建产物**（各包 `lib/` 目录），
+也可能撞上上游 master 的过渡期提交。
+
+```bash
+bash dshctl.sh --install --clean-build                   # 清理构建产物后重建（推荐）
+bash dshctl.sh --install --force-update --clean-build    # 若更新曾被本地修改阻塞
+bash dshctl.sh --install --clean                         # 彻底重克隆（最彻底）
+bash dshctl.sh --upgrade-check                           # 查看上游最新 tag
+bash dshctl.sh --install --ref <tag>                     # 锁定到具体版本
+```
+
+手工等价操作：在源码目录执行 `pnpm install && pnpm run clean && pnpm run build`。
+
 ## 运行 / 模型
 
 ### dsh 启动时报 `.env` 中的 `DEEPSEEK_BASE_URL` 非法

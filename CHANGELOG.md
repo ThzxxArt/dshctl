@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-10-12
+
+### 新增
+
+- `--clean-build`：安装依赖后先运行仓库自带的 `pnpm run clean`（清理 `lib/` 等构建产物）
+  再强制重建。用于修复「更新源码后残留旧构建产物」导致的构建失败（隐式 `--rebuild`）。
+
+### 变更
+
+- 构建失败时输出针对性指引：识别 `MISSING_EXPORT` / `Build failed with` 特征，
+  依次建议 `--clean-build`、`--force-update --clean-build`、`--clean`，并自动查询最新上游
+  tag 供 `--ref` 锁定；其他构建失败也给出清理/重克隆建议。
+- `--upgrade-check` 与构建失败指引共用 `latest_upstream_tag` 查询逻辑。
+
 ## [1.4.1] - 2026-10-02
 
 适配 DeepSeek Harness 0.1.7+ / 0.2.0（当前最新 `dsh-v0.2.0-rc.2`），保持 ≤0.1.6 兼容。
@@ -75,6 +89,7 @@
 - 增加 ShellCheck 静态检查、CLI 测试套件与 GitHub Actions CI；发布工作流在打 tag 时
   自动校验版本一致性并创建 Release。
 
-[Unreleased]: https://github.com/ThzxxArt/dshctl/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/ThzxxArt/dshctl/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.2
 [1.4.1]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.1
 [1.4.0]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.0

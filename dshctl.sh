@@ -97,6 +97,7 @@ SERVICE_ACTION=""
 DRY_RUN=0
 DO_BACKUP=1
 FORCE_REBUILD=0
+DO_CLEAN_BUILD=0
 PLUGIN_ACTION=""
 PLUGIN_PROFILE="web"
 PLUGIN_SPECS=()
@@ -104,7 +105,7 @@ MODEL_ACTION=""
 MODEL_BASE_URL=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.4.1"
+DSHCTL_VERSION="1.4.2"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -425,6 +426,8 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
                             连带构建 desktop bundle，耗时明显变长）
       --skip-deps           跳过 pnpm install（复用已有依赖）
       --rebuild             强制重跑依赖安装与构建（忽略"源码未变化"智能跳过）
+      --clean-build         先运行 pnpm run clean 清理构建产物（lib/ 等）再重建，
+                            用于更新源码后残留旧产物导致的构建失败（隐含 --rebuild）
       --force-update        更新源码时丢弃本地修改（git reset --hard 到目标 ref），
                             用于解决"本地改动阻塞快进合并"；未跟踪文件保留
 
@@ -796,6 +799,7 @@ while [ "$#" -gt 0 ]; do
     --typecheck)         DO_TYPECHECK=1 ;;
     --skip-deps)         DO_INSTALL_DEPS=0 ;;
     --rebuild)           FORCE_REBUILD=1 ;;
+    --clean-build)       DO_CLEAN_BUILD=1; FORCE_REBUILD=1 ;;
     --force-update)      FORCE_UPDATE=1 ;;
     --launcher)          DO_LAUNCHER=1 ;;
     --no-launcher)       DO_LAUNCHER=0 ;;
@@ -1567,6 +1571,52 @@ do_typecheck() {
   ok "类型检查通过"
 }
 
+# 构建失败后的针对性建议（更新后残留旧构建产物 / 上游过渡提交等）
+build_failure_hint() {
+  local recent="" tag=""
+  if [ -n "${LOG_FILE:-}" ] && [ -f "$LOG_FILE" ]; then
+    recent="$(tail -n 150 -- "$LOG_FILE" 2>/dev/null || true)"
+  fi
+  case "$recent" in
+    *MISSING_EXPORT*|*"Build failed with"*)
+      warn "构建失败：MISSING_EXPORT / Build failed 通常意味着更新源码后残留旧构建产物（lib/），或上游 master 处于过渡期提交。"
+      warn "建议按顺序尝试："
+      warn "  1) 清理构建产物后重建: dshctl --install --clean-build"
+      warn "  2) 丢弃本地修改并更新（可与上一条组合）: dshctl --install --force-update --clean-build"
+      warn "  3) 彻底重克隆: dshctl --install --clean"
+      tag="$(latest_upstream_tag || true)"
+      if [ -n "$tag" ]; then
+        warn "  4) 或锁定上游版本: dshctl --install --ref $tag"
+      else
+        warn "  4) 或锁定上游 tag: 先 --upgrade-check 查看最新 tag，再 --ref <tag>"
+      fi
+      ;;
+    *)
+      warn "构建失败：可尝试 dshctl --install --clean-build（清理构建产物后重建），"
+      warn "或 dshctl --install --clean（彻底重克隆）；若刚更新过源码，也可先 --force-update。"
+      ;;
+  esac
+  if [ -n "${LOG_FILE:-}" ]; then
+    warn "完整日志: $LOG_FILE"
+  fi
+  return 0
+}
+
+do_clean_build() {
+  [ "$DO_CLEAN_BUILD" -eq 1 ] || return 0
+  step "清理构建产物（pnpm run clean）"
+  local has_clean=""
+  if [ -f "$DSH_DIR/package.json" ] && command -v node >/dev/null 2>&1; then
+    has_clean="$(node -e 'const j=require(process.argv[1]);process.stdout.write((j.scripts&&j.scripts.clean)||"")' "$DSH_DIR/package.json" 2>/dev/null || true)"
+  fi
+  if [ -z "$has_clean" ]; then
+    warn "仓库 package.json 未提供 clean 脚本（旧版本 dsh？），跳过清理；可改用 --clean 重新克隆。"
+    return 0
+  fi
+  ( cd "$DSH_DIR" && pnpm run clean ) || die "清理构建产物失败（详见上方输出）。"
+  ok "构建产物已清理"
+}
+
 do_build() {
   step "构建项目（pnpm run build）"
   if [ "$DO_BUILD" -eq 0 ]; then
@@ -1577,7 +1627,12 @@ do_build() {
     info "源码未变化且已有构建产物，跳过构建（--rebuild 可强制重建）。"
     return 0
   fi
-  ( cd "$DSH_DIR" && pnpm run build )
+  local rc=0
+  ( cd "$DSH_DIR" && pnpm run build ) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    build_failure_hint
+    die "构建失败（退出码 ${rc}，详见上方输出）。"
+  fi
   write_build_stamp
   ok "构建完成"
 }
@@ -4136,6 +4191,16 @@ version_ge() { # $1 >= $2（只比较前三个数字段，忽略预发布后缀�
   return 0
 }
 
+# 最新上游 tag（dsh-v*；网络不可达或无仓库时输出空）
+latest_upstream_tag() {
+  [ -d "$DSH_DIR/.git" ] || return 0
+  local tags=""
+  tags="$(git -C "$DSH_DIR" ls-remote --tags origin 'dsh-v*' 2>/dev/null || true)"
+  [ -n "$tags" ] || return 0
+  printf '%s\n' "$tags" | grep -vF '^{}' | sed -E 's#.*refs/tags/([^ ]*).*#\1#' | sort -V | tail -n1
+  return 0
+}
+
 do_upgrade_check() {
   step "版本检查（本地 vs 上游）"
   local ver="" head=""
@@ -4152,10 +4217,9 @@ do_upgrade_check() {
   head="$(git -C "$DSH_DIR" rev-parse --short HEAD 2>/dev/null || true)"
   printf '  源码 HEAD  : %s\n' "${head:-未知}"
   info "查询上游（git ls-remote）..."
-  local tags latest_tag="" latest_ver="" remote_head="" local_head=""
-  tags="$(git -C "$DSH_DIR" ls-remote --tags origin 'dsh-v*' 2>/dev/null || true)"
-  if [ -n "$tags" ]; then
-    latest_tag="$(printf '%s\n' "$tags" | grep -vF '^{}' | sed -E 's#.*refs/tags/(dsh-v[^ ]*).*#\1#' | sort -V | tail -n1)"
+  local latest_tag="" latest_ver="" remote_head="" local_head=""
+  latest_tag="$(latest_upstream_tag || true)"
+  if [ -n "$latest_tag" ]; then
     latest_ver="${latest_tag#dsh-v}"
     printf '  上游最新tag: %s\n' "$latest_tag"
     if [ -n "$ver" ]; then
@@ -4423,12 +4487,14 @@ do_dry_run() {
 
   if [ -d "$DSH_DIR/.git" ]; then
     REPO_HEAD="$(repo_head)"
-    if [ "$DO_INSTALL_DEPS" -eq 0 ] && [ "$DO_BUILD" -eq 0 ]; then
+    if [ "$DO_INSTALL_DEPS" -eq 0 ] && [ "$DO_BUILD" -eq 0 ] && [ "$DO_CLEAN_BUILD" -eq 0 ]; then
       printf '  依赖/构建  : 按参数跳过（--skip-deps --no-build）\n'
     elif [ "$FORCE_REBUILD" -eq 0 ] && build_is_current; then
       printf '  依赖/构建  : 源码未变化，将跳过（--rebuild 可强制）\n'
     else
-      printf '  依赖/构建  : 将运行 pnpm install%s\n' "$([ "$DO_BUILD" -eq 1 ] && echo " + pnpm run build" || echo "")"
+      printf '  依赖/构建  : 将运行 pnpm install%s%s\n' \
+        "$([ "$DO_CLEAN_BUILD" -eq 1 ] && echo " + pnpm run clean" || echo "")" \
+        "$([ "$DO_BUILD" -eq 1 ] && echo " + pnpm run build" || echo "")"
     fi
   else
     printf '  依赖/构建  : 将运行 pnpm install%s\n' "$([ "$DO_BUILD" -eq 1 ] && echo " + pnpm run build" || echo "")"
@@ -4668,6 +4734,7 @@ main() {
   ensure_pnpm "$pm_ver"
 
   install_deps
+  do_clean_build
   do_typecheck
   do_build
   write_env
