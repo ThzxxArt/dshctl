@@ -22,6 +22,8 @@
 #             （--profile 指定 profile，默认 web；插件变更需重启服务生效）
 #  模型维护：--model-show / --model-check / --model-fix / --model-set-base
 #             （0.1.6 起 Messages 协议；0.1.7+ 配置位于 profile 的 cordis.patch.yml）
+#  访问能力：--url / --web-lan / --host <IP> / --public-url / --tls-cert / --tls-key / --trusted-host
+#             （dsh 0.2.1+ 起 Web 绑定一个具体网卡地址，不再支持 0.0.0.0 通配）
 #  数据维护：--data-backup / --data-restore / --data-archive-sessions / --data-prune
 #  版本能力：--rollback / --upgrade-check / --url / --backups-list / --backups-prune
 #  卸载能力：--uninstall 部分卸载 / --purge 完全卸载（自动备份运行数据）
@@ -41,6 +43,10 @@
 
 set -Eeuo pipefail
 
+# Bash 5.2+ 默认开启 patsub_replacement，会把 ${var//pat/repl} 替换串里的 & 当作
+# “匹配到的文本”。生成启动器时替换值可能含 &（路径等），这里按字面处理（旧版无此选项）。
+if shopt -q patsub_replacement 2>/dev/null; then shopt -u patsub_replacement; fi
+
 # -----------------------------------------------------------------------------
 # 默认配置
 # -----------------------------------------------------------------------------
@@ -48,11 +54,15 @@ DSH_REPO_URL="${DSH_REPO_URL:-https://github.com/deepseek-ai/deepseek-harness.gi
 DSH_REF="${DSH_REF:-master}"
 DSH_DIR="${DSH_DIR:-$HOME/deepseek-harness}"
 DSH_NODE_MAJOR="${DSH_NODE_MAJOR:-24}"
-DSH_PNPM_FALLBACK="${DSH_PNPM_FALLBACK:-11.7.0}"
+DSH_PNPM_FALLBACK="${DSH_PNPM_FALLBACK:-11.28.5}"
 DSH_HOST="${DSH_HOST:-127.0.0.1}"
 DSH_PORT="${DSH_PORT:-3080}"
 DSH_API_KEY="${DSH_API_KEY:-}"
 DSH_BASE_URL="${DSH_BASE_URL:-}"
+# Web 暴露能力（dsh 0.2.1+）：对外地址 / 原生 HTTPS
+DSH_PUBLIC_URL="${DSH_PUBLIC_URL:-}"
+DSH_TLS_CERT="${DSH_TLS_CERT:-}"
+DSH_TLS_KEY="${DSH_TLS_KEY:-}"
 
 # 代理（优先级：命令行参数 > 环境变量）
 DSH_GIT_PROXY="${DSH_GIT_PROXY:-${GIT_PROXY:-${https_proxy:-${HTTPS_PROXY:-}}}}"
@@ -80,6 +90,9 @@ DO_UNINSTALL=0
 DO_PURGE=0
 DO_WEB_LAN=0
 WEB_LAN_EXPLICIT=0
+# Web 暴露模式：off=仅本机 / auto=自动探测局域网 IP / explicit=指定具体 IP / patch=旧版 0.0.0.0 补丁
+WEB_MODE=""
+WEB_MODE_VALUE=""
 SKIP_NODE_INSTALL=0
 PROXY_EXPLICIT=0
 PROXY_SCOPE_EXPLICIT=0
@@ -105,7 +118,7 @@ MODEL_ACTION=""
 MODEL_BASE_URL=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.4.2"
+DSHCTL_VERSION="1.5.0"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -386,13 +399,19 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --ref REF             分支 / tag / commit（默认: master）
       --shallow             浅克隆（--depth 1，节省时间与磁盘）
       --clean               删除已有目录后重新克隆（配合 --uninstall 时删除源码）
-      --port PORT           Web UI 端口（默认: 3080）
-      --host HOST           监听地址（仅支持 127.0.0.1；局域网访问请用 --web-lan）
-      --web-lan             允许局域网访问 Web UI（绑定 0.0.0.0，patch 方式实现；
-                            会向同网段暴露可执行命令的界面，仅限可信网络）
-      提示：dsh 的「设置 / 模型 / 凭据 / 插件配置」页面为设计上的本机（loopback）
-            专属；局域网浏览器访问会报 settings are unavailable，建议在宿主机用
-            localhost 访问，或用 SSH 隧道把端口转发到本地后再配置。
+      --port PORT           Web UI 端口（默认: 3080；填 0 交给系统分配空闲端口）
+      --host HOST           监听地址。仅接受一个具体 IPv4/IPv6 字面量：默认
+                            127.0.0.1；填本机网卡地址即对局域网开放（dsh 0.2.1+
+                            不再接受 0.0.0.0 通配地址；旧版请用 --web-lan）
+      --web-lan             允许局域网访问 Web UI。dsh 0.2.1+ 自动绑定本机主网卡
+                            IPv4；0.2.1 以下用 0.0.0.0 补丁方式实现。会向同网段
+                            暴露可执行命令的界面（无登录鉴权），仅限可信网络
+      --public-url URL      对外访问地址（反向代理入口，http(s):// 开头，可带路径
+                            前缀；dsh 0.2.1+）。仅用于展示与凭据交换，不授予信任：
+                            浏览器使用的 host 仍需用 --trusted-host 声明
+      --tls-cert FILE       原生 HTTPS 证书链（PEM；需与 --tls-key 同时给出；
+                            dsh 0.2.1+。相对路径在安装时转为绝对路径）
+      --tls-key FILE        原生 HTTPS 私钥（未加密 PEM；需与 --tls-cert 同时给出）
       --no-web-lan          保持仅本机访问（默认；交互安装时会询问）
       --api-key KEY         写入 .env 的 DEEPSEEK_API_KEY
       --base-url URL        设置模型 API 地址（dsh 0.1.7+ 写入 profile 配置，
@@ -437,7 +456,7 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --systemd             安装并启动 systemd --user 服务（仅 Linux，需要启动器）
       --headless-selfcheck  构建后用无头模式做一次最小自检
       --node-major N        安装的 Node.js 主版本（默认: 24）
-      --pnpm-version V      pnpm 版本兜底值（默认: 11.7.0）
+      --pnpm-version V      pnpm 版本兜底值（默认: 11.28.5）
       --skip-node-install   若 Node 版本不匹配则报错退出，不自动安装
 
 运维选项:
@@ -455,8 +474,9 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --profile NAME        指定 profile（插件与模型操作默认 web；服务控制可用其他 profile）
       说明：插件安装/卸载/更新完成后会检测服务状态：交互时询问是否重启，
             -y 或非交互环境自动重启；安装插件 = 安装可执行代码，请确认来源可信。
-            dsh 0.2.0+ 会按插件 peerDependencies 校验 dsh 版本：不兼容的安装会被
-            拒绝并回滚；已安装但未豁免的插件会被启动拒载（--plugin-exemptions 查看，
+            dsh 0.2.0+ 会校验插件的 DSH 版本兼容性（0.2.1+ 优先看插件声明的
+            engines.dsh，未声明时回退 peerDependencies）：不兼容的安装会被拒绝并
+            回滚；已安装但未豁免的插件会被启动拒载（--plugin-exemptions 查看，
             --plugin-allow 授予精确版本豁免）。
 
 模型维护（dsh 0.1.6+ Base URL 配置规范排障）:
@@ -488,8 +508,11 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --upgrade-check       对比上游最新 tag / master 与本地版本（只读）
 
 访问助手:
-      --url                 打印带 token 的 Web UI 地址（局域网开启时附局域网地址与
-                            loopback 配置限制提示）
+      --url                 打印带 token 的 Web UI 地址（https / 对外地址自动识别）
+      --public-url URL      对外访问地址（反向代理入口；随 --install 写入启动器，
+                            或在 --start 时临时生效）
+      --tls-cert FILE       原生 HTTPS 证书链（配合 --tls-key）
+      --tls-key FILE        原生 HTTPS 私钥
       --trusted-host HOST   添加允许访问 GUI 的地址/主机名（可重复；随 --install
                             写入启动器，或在 --start 时临时附加）
 
@@ -511,7 +534,10 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
   bash dshctl.sh --install -y --api-key sk-xxxx
   bash dshctl.sh --install --shallow --typecheck --systemd
   bash dshctl.sh --install --dir /opt/dsh --ref v0.1.2-alpha.1 --port 4000
-  bash dshctl.sh --install --web-lan --port 4000     # 允许局域网访问
+  bash dshctl.sh --install --web-lan --port 4000     # 允许局域网访问（自动绑定本机网卡 IP）
+  bash dshctl.sh --install --host 192.168.1.20       # 绑定指定网卡地址（dsh 0.2.1+）
+  bash dshctl.sh --install --tls-cert ./fullchain.pem --tls-key ./privkey.pem
+  bash dshctl.sh --install --public-url https://dsh.example.com/ --trusted-host dsh.example.com
   bash dshctl.sh --install --npm-mirror https://registry.npmmirror.com
   bash dshctl.sh --install --git-proxy http://127.0.0.1:7890 --api-key sk-xxxx
   bash dshctl.sh --install --github-mirror https://gitclone.com/github.com/
@@ -554,6 +580,127 @@ need_val() {
     --*) die "选项 $1 缺少取值（收到了另一个选项: $2）" ;;
   esac
 }
+
+# -----------------------------------------------------------------------------
+# 监听地址判定（Web 绑定；dsh 0.2.1+ 拒绝通配地址，只接受具体 IP 字面量）
+# -----------------------------------------------------------------------------
+is_ipv4_literal() {
+  local ip="$1" o
+  case "$ip" in
+    ''|*[!0-9.]*|.*|*.) return 1 ;;
+  esac
+  local -a octets
+  IFS=. read -r -a octets <<< "$ip"
+  [ "${#octets[@]}" -eq 4 ] || return 1
+  for o in ${octets[@]+"${octets[@]}"}; do
+    [ -n "$o" ] || return 1
+    [ "$o" -le 255 ] 2>/dev/null || return 1
+  done
+  return 0
+}
+
+is_ipv6_literal() {
+  local ip="$1" addr="$1" zone=""
+  case "$ip" in
+    *%*) addr="${ip%%\%*}"; zone="${ip#*\%}" ;;
+  esac
+  case "$addr" in
+    *:*) ;;
+    *) return 1 ;;
+  esac
+  case "$addr" in
+    *[!0-9A-Fa-f:.]*) return 1 ;;
+  esac
+  if [ -n "$zone" ]; then
+    case "$zone" in
+      *[!A-Za-z0-9_.-]*) return 1 ;;
+    esac
+  fi
+  return 0
+}
+
+is_wildcard_host() {
+  local h="$1"
+  case "$h" in
+    0.0.0.0|::|::0|0::|::0.0.0.0|::ffff:0.0.0.0) return 0 ;;
+  esac
+  if is_ipv6_literal "$h"; then
+    case "$h" in
+      *[!0:]*) return 1 ;;
+      *) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+is_loopback_host() {
+  local h="$1"
+  case "$h" in
+    ::1|::ffff:127.0.0.1) return 0 ;;
+  esac
+  if is_ipv4_literal "$h"; then
+    case "$h" in
+      127.*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+host_is_nonloopback() {
+  local h="$1"
+  [ -n "$h" ] || return 1
+  is_loopback_host "$h" && return 1
+  return 0
+}
+
+is_ip_literal() {
+  is_ipv4_literal "$1" || is_ipv6_literal "$1"
+}
+
+# 首个非回环 IPv4（局域网地址）；失败返回空
+detect_lan_ip() {
+  local ip=""
+  if command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | grep -v '^127\.' | head -n1 || true)"
+  fi
+  if [ -z "$ip" ] && command -v ip >/dev/null 2>&1; then
+    ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*[[:space:]]src[[:space:]]\([0-9][0-9.]*\).*/\1/p' | head -n1 || true)"
+  fi
+  if [ -z "$ip" ] && command -v ifconfig >/dev/null 2>&1; then
+    ip="$(ifconfig 2>/dev/null | sed -n 's/.*inet \(addr:\)\{0,1\}\([0-9][0-9.]*\).*/\2/p' | grep -v '^127\.' | head -n1 || true)"
+  fi
+  if [ -z "$ip" ] && command -v ipconfig >/dev/null 2>&1; then
+    local ifc
+    for ifc in en0 en1 en2; do
+      ip="$(ipconfig getifaddr "$ifc" 2>/dev/null || true)"
+      [ -n "$ip" ] && break
+    done
+  fi
+  [ -n "$ip" ] && printf '%s' "$ip"
+  return 0
+}
+
+# 相对路径 → 绝对路径（TLS 证书/密钥按启动工作目录解析，这里统一转绝对）
+resolve_abs_path() {
+  local p="$1"
+  case "$p" in
+    "~")   p="$HOME" ;;
+    "~"/*) p="$HOME/${p#\~/}" ;;
+  esac
+  case "$p" in
+    /*) ;;
+    *)  p="$PWD/$p" ;;
+  esac
+  if command -v realpath >/dev/null 2>&1; then
+    local r
+    r="$(realpath -m -- "$p" 2>/dev/null || true)"
+    [ -n "$r" ] && p="$r"
+  fi
+  printf '%s' "$p"
+}
+
+# 转义为双引号内可安全承载的字面量（用于生成启动器脚本）
+esc_dq() { printf '%s' "$1" | sed 's/[\\"$`]/\\&/g'; }
 
 # 参数校验：操作互斥、模式-参数匹配、非法取值
 require_mode() {
@@ -674,6 +821,8 @@ validate_args() {
       --url|--upgrade-check) ;;
       --profile)   require_mode_profile ;;
       --trusted-host) require_mode "$opt" install service ;;
+      --public-url|--tls-cert|--tls-key) require_mode "$opt" install service ;;
+      --host)      require_mode "$opt" install ;;
       --last)      require_mode "$opt" service ;;
       --no-proxy)  require_mode "$opt" install doctor ;;
       --no-backup) require_mode "$opt" install uninstall ;;
@@ -697,8 +846,24 @@ validate_args() {
   case "$DSH_PORT" in
     ''|*[!0-9]*) die "--port 必须是数字: $DSH_PORT" ;;
   esac
-  if [ "$DSH_PORT" -lt 1 ] || [ "$DSH_PORT" -gt 65535 ]; then
-    die "--port 超出范围（1-65535）: $DSH_PORT"
+  if [ "$DSH_PORT" -gt 65535 ]; then
+    die "--port 超出范围（0-65535，0 表示由系统分配）: $DSH_PORT"
+  fi
+  if ! is_loopback_host "$DSH_HOST" && ! is_wildcard_host "$DSH_HOST" && ! is_ip_literal "$DSH_HOST"; then
+    die "--host 只接受具体 IPv4/IPv6 地址（或兼容用的 0.0.0.0）: $DSH_HOST"
+  fi
+  if [ -n "$DSH_PUBLIC_URL" ]; then
+    case "$DSH_PUBLIC_URL" in
+      http://*|https://*) ;;
+      *) die "--public-url 必须以 http:// 或 https:// 开头: $DSH_PUBLIC_URL" ;;
+    esac
+  fi
+  if [ -n "$DSH_TLS_CERT" ] || [ -n "$DSH_TLS_KEY" ]; then
+    if [ -z "$DSH_TLS_CERT" ] || [ -z "$DSH_TLS_KEY" ]; then
+      die "--tls-cert 与 --tls-key 必须成对提供（原生 HTTPS 需要证书链与私钥）"
+    fi
+    DSH_TLS_CERT="$(resolve_abs_path "$DSH_TLS_CERT")"
+    DSH_TLS_KEY="$(resolve_abs_path "$DSH_TLS_KEY")"
   fi
   case "$LOG_MAX_MB" in
     ''|*[!0-9]*) die "--log-max-mb 必须是非负整数: $LOG_MAX_MB" ;;
@@ -777,15 +942,18 @@ while [ "$#" -gt 0 ]; do
     --clean)             FORCE_CLEAN=1 ;;
     --port)              need_val "$@"; DSH_PORT="$2"; PORT_EXPLICIT=1; shift ;;
     --host)              need_val "$@"; DSH_HOST="$2"
-                         if [ "$DSH_HOST" = "0.0.0.0" ]; then
+                         if host_is_nonloopback "$DSH_HOST"; then
                            if [ "$WEB_LAN_EXPLICIT" -eq 1 ] && [ "$DO_WEB_LAN" -eq 0 ]; then
-                             die "参数冲突：--host 0.0.0.0 与 --no-web-lan 同时指定。"
+                             die "参数冲突：--host $DSH_HOST 与 --no-web-lan 同时指定。"
                            fi
                            DO_WEB_LAN=1; WEB_LAN_EXPLICIT=1
                          fi
                          shift ;;
     --web-lan|--lan)     DO_WEB_LAN=1; WEB_LAN_EXPLICIT=1 ;;
     --no-web-lan|--no-lan) DO_WEB_LAN=0; WEB_LAN_EXPLICIT=1 ;;
+    --public-url)        need_val "$@"; DSH_PUBLIC_URL="$2"; shift ;;
+    --tls-cert)          need_val "$@"; DSH_TLS_CERT="$2"; shift ;;
+    --tls-key)           need_val "$@"; DSH_TLS_KEY="$2"; shift ;;
     --api-key)           need_val "$@"; DSH_API_KEY="$2"; shift ;;
     --base-url)          need_val "$@"; DSH_BASE_URL="$2"; shift ;;
     --git-proxy|--proxy) need_val "$@"; DSH_GIT_PROXY="$2"; PROXY_EXPLICIT=1; shift ;;
@@ -984,10 +1152,21 @@ resolve_effective_port() {
   case "$p" in
     ''|*[!0-9]*) return 0 ;;
   esac
-  if [ "$p" -ge 1 ] && [ "$p" -le 65535 ]; then
+  if [ "$p" -ge 0 ] && [ "$p" -le 65535 ]; then
     DSH_PORT="$p"
   fi
   return 0
+}
+
+# 从 Web 启动日志中读取实际监听端口（--port 0 时由系统分配）
+# $2 可选：跳过前面的行数（避免读到上一次运行留下的历史 URL）
+detect_logged_port() {
+  local f="$1" skip="${2:-0}"
+  [ -f "$f" ] || return 0
+  case "$skip" in ''|*[!0-9]*) skip=0 ;; esac
+  tail -n "+$((skip + 1))" -- "$f" 2>/dev/null \
+    | grep -Eo 'https?://[^[:space:]/]+:[0-9]{1,5}' \
+    | sed -E 's#.*:([0-9]{1,5})$#\1#' | tail -n1 || true
 }
 
 # URL 连通性探测：200/3xx/401/403 等有响应即视为可达
@@ -1707,14 +1886,46 @@ write_env() {
 }
 
 # -----------------------------------------------------------------------------
-# 局域网访问（0.0.0.0，patch 方式）
-#   上游 CLI 禁用 --host 0.0.0.0，但 webserver 配置层允许；
-#   用 --patch 覆盖 webserver 行配置即可，且上游会自动信任本机网卡 IP。
+# Web 访问范围（本机 / 局域网 / 具体网卡 / 对外地址 / HTTPS）
+#   dsh 0.2.1-alpha.2 起 webserver 拒绝通配地址（0.0.0.0/:: 等），必须绑定一个
+#   具体 IPv4/IPv6；≤0.2.1-alpha.1（含 0.2.0）仍接受 0.0.0.0，用 --patch 覆盖
+#   webserver 行 config 实现局域网访问。
 # -----------------------------------------------------------------------------
+resolve_web_access_mode() {
+  local ver="" concrete=0
+  ver="$(installed_dsh_version || true)"
+  if [ -n "$ver" ] && version_has_concrete_host "$ver"; then concrete=1; fi
+  if [ "$DO_WEB_LAN" -eq 1 ]; then
+    if [ "$concrete" -eq 1 ]; then
+      if [ -n "$DSH_HOST" ] && ! is_loopback_host "$DSH_HOST" && ! is_wildcard_host "$DSH_HOST"; then
+        WEB_MODE="explicit"; WEB_MODE_VALUE="$DSH_HOST"
+      else
+        WEB_MODE="auto"; WEB_MODE_VALUE=""
+      fi
+    else
+      WEB_MODE="patch"; WEB_MODE_VALUE="0.0.0.0"
+    fi
+  elif [ -n "$DSH_HOST" ] && ! is_loopback_host "$DSH_HOST"; then
+    if [ "$concrete" -eq 1 ]; then
+      WEB_MODE="explicit"; WEB_MODE_VALUE="$DSH_HOST"
+    else
+      die "当前 dsh（${ver:-未知}）不支持绑定具体地址 --host ${DSH_HOST}；局域网访问请用 --web-lan。"
+    fi
+  else
+    WEB_MODE="off"; WEB_MODE_VALUE="127.0.0.1"
+  fi
+  return 0
+}
+
 choose_web_lan() {
   if [ "$WEB_LAN_EXPLICIT" -eq 1 ]; then
     if [ "$DO_WEB_LAN" -eq 1 ]; then
-      info "Web UI 将允许局域网访问（绑定 0.0.0.0）"
+      case "$WEB_MODE" in
+        explicit) info "Web UI 将绑定 ${WEB_MODE_VALUE}（允许局域网访问）" ;;
+        auto)     info "Web UI 将自动绑定本机主网卡 IPv4（允许局域网访问）" ;;
+        patch)    info "Web UI 将允许局域网访问（0.0.0.0 通配，旧版 dsh 补丁方式）" ;;
+        *)        info "Web UI 将允许局域网访问（具体绑定方式按 dsh 版本在安装时确定）" ;;
+      esac
     else
       info "Web UI 仅本机访问（127.0.0.1）"
     fi
@@ -1727,7 +1938,7 @@ choose_web_lan() {
   fi
 
   step "Web UI 访问范围"
-  printf '是否允许局域网访问（Web UI 绑定 0.0.0.0）？\n'
+  printf '是否允许局域网访问（绑定本机主网卡地址）？\n'
   printf '安全提醒：这会把可执行命令的 Web UI 暴露给同网段设备，且无登录鉴权，仅限可信网络。\n'
   printf '允许局域网访问？[y/N] '
   local answer=""
@@ -1743,12 +1954,38 @@ choose_web_lan() {
   fi
 }
 
-install_web_lan_patch() {
-  if [ "$DO_WEB_LAN" -eq 1 ]; then
-    step "启用局域网访问（0.0.0.0）"
-    mkdir -p "$(dirname -- "$WEB_LAN_PATCH")"
-    cat > "$WEB_LAN_PATCH" <<'EOF'
+# 应用 Web 访问方式：具体网卡绑定无需补丁；旧版写 0.0.0.0 补丁；本机模式清理旧补丁
+setup_web_access() {
+  if [ -z "$WEB_MODE" ]; then resolve_web_access_mode; fi
+  case "$WEB_MODE" in
+    auto|explicit)
+      if [ -f "$WEB_LAN_PATCH" ]; then
+        rm -f -- "$WEB_LAN_PATCH"
+        rmdir -- "$(dirname -- "$WEB_LAN_PATCH")" 2>/dev/null || true
+        info "已移除旧的 0.0.0.0 局域网补丁（改用具体网卡绑定）"
+      fi
+      if [ "$WEB_MODE" = "auto" ]; then
+        local ip=""
+        ip="$(detect_lan_ip)"
+        if [ -n "$ip" ]; then
+          info "Web UI 将对局域网开放：绑定本机地址 ${ip}（启动时自动探测，网卡变化会自动重试）"
+        else
+          warn "未能预探测到局域网 IPv4；启动时若仍失败会提示改用 --host <IP>。"
+        fi
+      else
+        info "Web UI 将对局域网开放：绑定 ${WEB_MODE_VALUE}"
+      fi
+      warn "安全提示：局域网内任何设备都可访问该 Web UI（无登录鉴权），请确认网络可信。"
+      if [ "$DO_LAUNCHER" -ne 1 ]; then
+        warn "本次未安装/更新启动器：请手动以 --host <IP> 绑定网卡地址启动。"
+      fi
+      ;;
+    patch)
+      step "启用局域网访问（0.0.0.0 通配，旧版 dsh）"
+      mkdir -p "$(dirname -- "$WEB_LAN_PATCH")"
+      cat > "$WEB_LAN_PATCH" <<'EOF'
 # 由 dshctl.sh 生成：允许局域网访问 Web UI（监听 0.0.0.0）。
+# 仅适用于 dsh ≤ 0.2.1-alpha.1（0.2.1-alpha.2+ 起 webserver 会拒绝通配地址）。
 # 警告：这会把可执行命令的 Web UI 暴露到局域网，仅限可信网络使用。
 # 恢复仅本机访问：删除本文件，并去掉启动参数中的 --patch。
 - id: webserver
@@ -1759,19 +1996,24 @@ install_web_lan_patch() {
     compressionLevel: 1
     compressionThresholdBytes: 1024
 EOF
-    ok "已写入局域网访问补丁: $WEB_LAN_PATCH"
-    warn "安全提示：局域网内任何设备都可访问该 Web UI（无登录鉴权），请确认网络可信。"
-    warn "提示：dsh 设计上「设置 / 模型 / 凭据 / 插件配置」页面仅在本机（loopback）访问时可用；"
-    warn "      通过局域网 IP 访问会提示 settings are unavailable（聊天与插件列表不受影响）。"
-    warn "      请在宿主机用 http://localhost:<端口> 访问，或使用 SSH 隧道把远端转发为本地地址。"
-    if [ "$DO_LAUNCHER" -ne 1 ]; then
-      warn "本次未安装/更新启动器：补丁不会被自动应用，手动启动请加 --patch $WEB_LAN_PATCH"
-    fi
-  elif [ -f "$WEB_LAN_PATCH" ]; then
-    rm -f -- "$WEB_LAN_PATCH"
-    rmdir -- "$(dirname -- "$WEB_LAN_PATCH")" 2>/dev/null || true
-    ok "已移除旧的局域网访问补丁（恢复仅本机访问）"
-  fi
+      ok "已写入局域网访问补丁: $WEB_LAN_PATCH"
+      warn "安全提示：局域网内任何设备都可访问该 Web UI（无登录鉴权），请确认网络可信。"
+      if [ -n "$DSH_PUBLIC_URL$DSH_TLS_CERT" ]; then
+        warn "注意：当前 dsh 版本不支持 --public-url / --tls-cert / --tls-key，相关设置不会写入启动器。"
+      fi
+      if [ "$DO_LAUNCHER" -ne 1 ]; then
+        warn "本次未安装/更新启动器：补丁不会被自动应用，手动启动请加 --patch $WEB_LAN_PATCH"
+      fi
+      ;;
+    *)
+      if [ -f "$WEB_LAN_PATCH" ]; then
+        rm -f -- "$WEB_LAN_PATCH"
+        rmdir -- "$(dirname -- "$WEB_LAN_PATCH")" 2>/dev/null || true
+        ok "已移除旧的局域网访问补丁（恢复仅本机访问）"
+      fi
+      ;;
+  esac
+  return 0
 }
 
 # -----------------------------------------------------------------------------
@@ -1781,45 +2023,113 @@ install_launcher() {
   [ "$DO_LAUNCHER" -eq 1 ] || return 0
   step "安装 dsh 启动器"
 
+  if [ -z "$WEB_MODE" ]; then resolve_web_access_mode; fi
+
   local bin_dir="$HOME/.local/bin"
-  local th_flags=""
-  if [ "${#TRUSTED_HOSTS[@]}" -gt 0 ]; then
-    local t
-    for t in ${TRUSTED_HOSTS[@]+"${TRUSTED_HOSTS[@]}"}; do
-      th_flags="$th_flags --trusted-host \"$t\""
-    done
-  fi
-  local web_cmd
-  if [ "$DO_WEB_LAN" -eq 1 ]; then
-    # 0.0.0.0 由 patch 覆盖配置实现；不能再传 --host（上游 CLI 会拒绝 0.0.0.0）
-    web_cmd="exec pnpm dsh web --patch \"$WEB_LAN_PATCH\" --port \"\$DSH_PORT\"$th_flags \"\${@:2}\""
-  else
-    web_cmd="exec pnpm dsh web --host \"\$DSH_HOST\" --port \"\$DSH_PORT\"$th_flags \"\${@:2}\""
-  fi
-  mkdir -p "$bin_dir"
-  cat > "$bin_dir/dsh" <<EOF
+  local baked_host="127.0.0.1"
+  case "$WEB_MODE" in
+    explicit) baked_host="$WEB_MODE_VALUE" ;;
+    auto|patch) baked_host="" ;;
+  esac
+
+  # 受信任主机 → 启动器内 args+= 语句（值已转义）
+  local trusted_block="" t tq
+  for t in ${TRUSTED_HOSTS[@]+"${TRUSTED_HOSTS[@]}"}; do
+    tq="$(esc_dq "$t")"
+    trusted_block="$trusted_block  if [ -n \"$tq\" ]; then args+=(--trusted-host \"$tq\"); fi"$'\n'
+  done
+
+  local tmpl
+  tmpl="$(cat <<'LAUNCHER_EOF'
 #!/usr/bin/env bash
 # dsh 启动器（由 dshctl.sh 生成）
 set -Eeuo pipefail
-DSH_DIR="$DSH_DIR"
-DSH_HOST="\${DSH_HOST:-$DSH_HOST}"
-DSH_PORT="\${DSH_PORT:-$DSH_PORT}"
+DSH_DIR="@DSH_DIR@"
+DSH_HOST_MODE="@DSH_HOST_MODE@"
+DSH_HOST_BAKED="@DSH_HOST@"
+DSH_HOST="${DSH_HOST:-@DSH_HOST@}"
+DSH_PORT="${DSH_PORT:-@DSH_PORT@}"
+DSH_PUBLIC_URL_BAKED="@DSH_PUBLIC_URL@"
+DSH_TLS_CERT_BAKED="@DSH_TLS_CERT@"
+DSH_PUBLIC_URL="${DSH_PUBLIC_URL:-@DSH_PUBLIC_URL@}"
+DSH_TLS_CERT="${DSH_TLS_CERT:-@DSH_TLS_CERT@}"
+DSH_TLS_KEY="${DSH_TLS_KEY:-@DSH_TLS_KEY@}"
 
-[ -d "\$DSH_DIR" ] || { echo "dsh 源码目录不存在: \$DSH_DIR" >&2; exit 1; }
-cd "\$DSH_DIR"
+[ -d "$DSH_DIR" ] || { echo "dsh 源码目录不存在: $DSH_DIR" >&2; exit 1; }
+cd "$DSH_DIR"
 
 # 载入 nvm（若存在），确保能找到 pnpm/node
-export NVM_DIR="\${NVM_DIR:-\$HOME/.nvm}"
-[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true
-export PATH="\$HOME/.local/bin:\$PATH"
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true
+export PATH="$HOME/.local/bin:$PATH"
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
-case "\${1:-web}" in
-  web)       $web_cmd ;;
-  headless)  shift; exec pnpm dsh --profile headless "\$@" ;;
-  *)         exec pnpm dsh "\$@" ;;
+# 探测第一个非回环 IPv4（局域网地址）
+dsh_detect_lan_ip() {
+  local ip="" ifc
+  if command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -E '^[0-9][0-9.]*$' | head -n1 || true)"
+  fi
+  if [ -z "$ip" ] && command -v ipconfig >/dev/null 2>&1; then
+    for ifc in en0 en1 en2; do
+      ip="$(ipconfig getifaddr "$ifc" 2>/dev/null || true)"
+      [ -n "$ip" ] && break
+    done
+  fi
+  [ -n "$ip" ] && printf '%s' "$ip"
+  return 0
+}
+
+dsh_web() {
+  local -a args=()
+  local host="$DSH_HOST"
+  case "$DSH_HOST_MODE" in
+    auto)
+      host="${DSH_LAN_IP:-$(dsh_detect_lan_ip)}"
+      if [ -z "$host" ]; then
+        echo "dsh: 无法自动检测局域网 IPv4，请用 --host <IP> 指定具体网卡地址" >&2
+        exit 1
+      fi
+      ;;
+    patch)
+      args=(web --patch "@WEB_LAN_PATCH@" --port "$DSH_PORT")
+@TRUSTED@
+      exec pnpm dsh "${args[@]}" "$@"
+      ;;
+    explicit)
+      [ -n "$host" ] || host="@DSH_HOST@"
+      ;;
+    *)
+      [ -n "$host" ] || host="127.0.0.1"
+      ;;
+  esac
+  args=(web --host "$host" --port "$DSH_PORT")
+  if [ -n "$DSH_PUBLIC_URL" ]; then args+=(--public-url "$DSH_PUBLIC_URL"); fi
+  if [ -n "$DSH_TLS_CERT" ]; then args+=(--tls-cert "$DSH_TLS_CERT" --tls-key "$DSH_TLS_KEY"); fi
+@TRUSTED@
+  exec pnpm dsh "${args[@]}" "$@"
+}
+
+case "${1:-web}" in
+  web)       dsh_web "${@:2}" ;;
+  headless)  exec pnpm dsh --profile headless "${@:2}" ;;
+  *)         exec pnpm dsh "$@" ;;
 esac
-EOF
+LAUNCHER_EOF
+)"
+
+  tmpl="${tmpl//@DSH_DIR@/$(esc_dq "$DSH_DIR")}"
+  tmpl="${tmpl//@DSH_HOST_MODE@/$WEB_MODE}"
+  tmpl="${tmpl//@DSH_HOST@/$(esc_dq "$baked_host")}"
+  tmpl="${tmpl//@DSH_PORT@/$DSH_PORT}"
+  tmpl="${tmpl//@DSH_PUBLIC_URL@/$(esc_dq "$DSH_PUBLIC_URL")}"
+  tmpl="${tmpl//@DSH_TLS_CERT@/$(esc_dq "$DSH_TLS_CERT")}"
+  tmpl="${tmpl//@DSH_TLS_KEY@/$(esc_dq "$DSH_TLS_KEY")}"
+  tmpl="${tmpl//@WEB_LAN_PATCH@/$(esc_dq "$WEB_LAN_PATCH")}"
+  tmpl="${tmpl//@TRUSTED@/$trusted_block}"
+
+  mkdir -p "$bin_dir"
+  printf '%s\n' "$tmpl" > "$bin_dir/dsh"
   chmod 0755 "$bin_dir/dsh"
 
   # 记录本次安装端口，供 --start/--stop/--status 等未显式指定 --port 时默认使用
@@ -1897,18 +2207,28 @@ headless_selfcheck() {
   [ "$DO_HEADLESS_SELFCHECK" -eq 1 ] || return 0
   step "无头模式自检"
 
-  # 与上游凭据解析顺序对齐：环境变量 → .env → ~/.dsh/.credentials.yaml
-  local have_key=0
-  if [ -n "$DSH_API_KEY" ] || [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-    have_key=1
-  elif [ -f "$DSH_DIR/.env" ] && grep -qE '^[[:space:]]*DEEPSEEK_API_KEY=[^[:space:]#]' "$DSH_DIR/.env" 2>/dev/null; then
-    have_key=1
-  elif [ -f "${DSH_HOME:-$HOME/.dsh}/.credentials.yaml" ]; then
-    have_key=1
+  # dsh 0.2.1+ 的 headless 只读 launch env → <cwd>/.env → $DSH_HOME/.env，
+  # 不再读取 GUI 保存的凭据；仅有已保存凭据时临时注入，避免自检假阴性。
+  local have=0 inject=""
+  if [ -n "${DEEPSEEK_API_KEY:-}" ]; then have=1; fi
+  if [ "$have" -eq 0 ] && [ -n "$(read_env_var "$DSH_DIR/.env" DEEPSEEK_API_KEY)" ]; then have=1; fi
+  if [ "$have" -eq 0 ] && [ -n "$(read_env_var "$DSH_HOME_ABS/.env" DEEPSEEK_API_KEY)" ]; then have=1; fi
+  if [ "$have" -eq 0 ]; then
+    inject="$(read_yaml_value "$DSH_HOME_ABS/.credentials.yaml" 'api_?key|apikey|api-key')"
+    [ -n "$inject" ] && have=1
   fi
 
-  if [ "$have_key" -eq 0 ]; then
-    warn "未提供 API Key，跳过无头自检（需要真实密钥才能调用模型）。"
+  if [ "$have" -eq 0 ]; then
+    warn "未提供 API Key（headless 只读环境变量 / .env，不读 GUI 保存的凭据），跳过无头自检。"
+    return 0
+  fi
+  if [ -n "$inject" ]; then
+    info "headless 不读取 GUI 保存的凭据，本次临时注入该密钥自检（不修改任何文件）。"
+    if ( cd "$DSH_DIR" && DEEPSEEK_API_KEY="$inject" pnpm dsh --profile headless "回复 OK 即可" ); then
+      ok "无头模式自检通过"
+    else
+      warn "无头模式自检未通过，请检查密钥与网络。"
+    fi
     return 0
   fi
 
@@ -2129,6 +2449,13 @@ web_running_pid() {
   if pid_alive "$pid"; then printf '%s' "$pid"; fi
 }
 
+# 读取启动器中形如 VAR="value" 的烘焙值（去除两侧引号）
+launcher_var() {
+  local file="$1" name="$2"
+  [ -f "$file" ] || return 0
+  sed -n "s/^${name}=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "$file" 2>/dev/null | head -n1 || true
+}
+
 do_status() {
   step "DeepSeek Harness 状态"
   printf '  dshctl     : v%s\n' "$DSHCTL_VERSION"
@@ -2184,17 +2511,24 @@ do_status() {
       ;;
   esac
 
-  if port_listening "$DSH_PORT"; then
+  local eff_port="$DSH_PORT"
+  if [ "$eff_port" -eq 0 ]; then
+    eff_port="$(detect_logged_port "$WEB_LOG_FILE")"
+    [ -n "$eff_port" ] || eff_port="0"
+  fi
+  if [ "$eff_port" != "0" ] && port_listening "$eff_port"; then
     local lpid lnote
-    lpid="$(port_listener_pid "$DSH_PORT")"
+    lpid="$(port_listener_pid "$eff_port")"
     if [ -n "$lpid" ]; then
       lnote="（PID ${lpid}）"
     else
       lnote="（占用进程无法识别，可能来自其他 WSL 发行版/主机）"
     fi
-    printf '  端口 %-6s: 监听中%s\n' "$DSH_PORT" "$lnote"
+    printf '  端口 %-6s: 监听中%s\n' "$eff_port" "$lnote"
+  elif [ "$DSH_PORT" -eq 0 ]; then
+    printf '  端口       : 由系统分配（未检测到监听记录）\n'
   else
-    printf '  端口 %-6s: 未监听\n' "$DSH_PORT"
+    printf '  端口 %-6s: 未监听\n' "$eff_port"
   fi
 
   local plugin_pkg="$PROFILES_DIR/web/package.json"
@@ -2220,12 +2554,29 @@ do_status() {
     printf '  模型兼容   : 未知（源码未安装）\n'
   fi
 
-  if [ -f "$WEB_LAN_PATCH" ]; then
-    if [ -x "$HOME/.local/bin/dsh" ] && grep -q -- '--patch' "$HOME/.local/bin/dsh" 2>/dev/null; then
-      printf '  局域网访问 : 已启用（0.0.0.0，启动器已配置补丁）\n'
-    else
-      printf '  局域网访问 : 补丁存在，但启动器未引用（重跑安装或手动 --patch）\n'
-    fi
+  local launcher="$HOME/.local/bin/dsh"
+  if [ -f "$launcher" ]; then
+    local lmode="" lpub="" ltls=""
+    lmode="$(launcher_var "$launcher" DSH_HOST_MODE)"
+    lpub="$(launcher_var "$launcher" DSH_PUBLIC_URL_BAKED)"
+    ltls="$(launcher_var "$launcher" DSH_TLS_CERT_BAKED)"
+    case "$lmode" in
+      auto)     printf '  局域网访问 : 已启用（启动时自动绑定本机主网卡 IPv4）\n' ;;
+      explicit) printf '  局域网访问 : 已启用（绑定 %s）\n' "$(launcher_var "$launcher" DSH_HOST_BAKED)" ;;
+      patch)    printf '  局域网访问 : 已启用（0.0.0.0 通配，旧版 dsh 补丁）\n' ;;
+      off)      printf '  局域网访问 : 未启用（仅本机 127.0.0.1）\n' ;;
+      *)
+        if [ -f "$WEB_LAN_PATCH" ]; then
+          printf '  局域网访问 : 补丁存在，但启动器未引用（重跑安装或手动 --patch）\n'
+        else
+          printf '  局域网访问 : 未知（启动器缺少标记，重跑 --install 可更新）\n'
+        fi
+        ;;
+    esac
+    [ -n "$ltls" ] && printf '  HTTPS      : 已启用（证书: %s）\n' "$ltls"
+    [ -n "$lpub" ] && printf '  对外地址   : %s\n' "$lpub"
+  elif [ -f "$WEB_LAN_PATCH" ]; then
+    printf '  局域网访问 : 补丁存在，但未安装启动器\n'
   else
     printf '  局域网访问 : 未启用（仅本机）\n'
   fi
@@ -2333,10 +2684,23 @@ do_doctor() {
 
   # Web UI 可达性 / 数据占用 / 局域网提示 / 插件加载错误
   if port_listening "$DSH_PORT"; then
+    # 按启动器标记构造实际探测地址（具体 IP 绑定 / 原生 HTTPS 下 127.0.0.1 会误报）
+    local ui_scheme="http" ui_host="127.0.0.1" ui_opt=(--noproxy '*')
+    if [ -x "$HOME/.local/bin/dsh" ]; then
+      local dm dh dt
+      dm="$(launcher_var "$HOME/.local/bin/dsh" DSH_HOST_MODE)"
+      dh="$(launcher_var "$HOME/.local/bin/dsh" DSH_HOST_BAKED)"
+      dt="$(launcher_var "$HOME/.local/bin/dsh" DSH_TLS_CERT_BAKED)"
+      if [ -n "$dt" ]; then ui_scheme="https"; ui_opt+=(-k); fi
+      case "$dm" in
+        explicit) [ -n "$dh" ] && ui_host="$dh" ;;
+        auto)     ui_host="$(detect_lan_ip)"; [ -n "$ui_host" ] || ui_host="127.0.0.1" ;;
+      esac
+    fi
     local uicode
-    uicode="$(curl -s -m 6 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$DSH_PORT/" 2>/dev/null || true)"
+    uicode="$(curl -s -m 6 ${ui_opt[@]+"${ui_opt[@]}"} -o /dev/null -w '%{http_code}' "$ui_scheme://$ui_host:$DSH_PORT/" 2>/dev/null || true)"
     case "$uicode" in
-      2*|3*|401|403) printf '  Web UI     : ✔ 可达（HTTP %s）\n' "$uicode" ;;
+      2*|3*|401|403) printf '  Web UI     : ✔ 可达（%s://%s:%s，HTTP %s）\n' "$ui_scheme" "$ui_host" "$DSH_PORT" "$uicode" ;;
       *[0-9]*)       printf '  Web UI     : ⚠ 响应异常（HTTP %s）\n' "$uicode" ;;
       *)             printf '  Web UI     : ⚠ 无响应（端口已监听但 HTTP 未响应）\n' ;;
     esac
@@ -2349,7 +2713,21 @@ do_doctor() {
     fi
   fi
   if [ -f "$WEB_LAN_PATCH" ]; then
-    printf '  局域网提示 : 设置/模型等页面仅 loopback 可用（上游设计）；建议本机 localhost 访问\n'
+    printf '  局域网提示 : 旧版补丁方式（0.0.0.0）。dsh 0.2.1+ 请改绑具体网卡地址（重新 --install 即可）\n'
+  fi
+  if [ -x "$HOME/.local/bin/dsh" ]; then
+    local lcert lpub
+    lcert="$(launcher_var "$HOME/.local/bin/dsh" DSH_TLS_CERT_BAKED)"
+    lpub="$(launcher_var "$HOME/.local/bin/dsh" DSH_PUBLIC_URL_BAKED)"
+    if [ -n "$lcert" ]; then
+      if [ -r "$lcert" ]; then
+        printf '  HTTPS 证书 : ✔ %s\n' "$lcert"
+      else
+        printf '  HTTPS 证书 : ⚠ 不可读（%s）——启动会失败，请检查路径/权限\n' "$lcert"
+        problems=$((problems + 1))
+      fi
+    fi
+    [ -n "$lpub" ] && printf '  对外地址   : %s\n' "$lpub"
   fi
   if [ -f "$WEB_LOG_FILE" ]; then
     local plerr=""
@@ -2430,7 +2808,7 @@ service_ctl_pid() {
         return 0
       fi
       local pre_pid=""
-      if [ "$is_web" -eq 1 ]; then
+      if [ "$is_web" -eq 1 ] && [ "$DSH_PORT" -ne 0 ]; then
         pre_pid="$(port_listener_pid "$DSH_PORT")"
         if port_listening "$DSH_PORT"; then
           if [ -n "$pre_pid" ]; then
@@ -2442,38 +2820,61 @@ service_ctl_pid() {
         fi
       fi
       mkdir -p "$STATE_DIR"
+      # 记录启动前的日志行数：--port 0 时只在新写入的日志里找实际端口，避免读到上次运行的历史 URL
+      local log_before=0
+      if [ -f "$log_file" ]; then
+        log_before="$(wc -l < "$log_file" 2>/dev/null | tr -d ' ' || true)"
+        case "$log_before" in ''|*[!0-9]*) log_before=0 ;; esac
+      fi
       # 关闭继承自脚本的保存输出 fd（3/4）与锁 fd（9），避免守护进程占住管道
       if [ "$is_web" -eq 1 ]; then
+        local -a env_args=("DSH_PORT=$DSH_PORT")
+        [ -n "$DSH_PUBLIC_URL" ] && env_args+=("DSH_PUBLIC_URL=$DSH_PUBLIC_URL")
+        if [ -n "$DSH_TLS_CERT" ]; then env_args+=("DSH_TLS_CERT=$DSH_TLS_CERT" "DSH_TLS_KEY=$DSH_TLS_KEY"); fi
         local -a th_args=()
         if [ "${#TRUSTED_HOSTS[@]}" -gt 0 ]; then
           local t
           for t in ${TRUSTED_HOSTS[@]+"${TRUSTED_HOSTS[@]}"}; do th_args+=(--trusted-host "$t"); done
         fi
-        nohup env DSH_PORT="$DSH_PORT" "$HOME/.local/bin/dsh" web --no-open ${th_args[@]+"${th_args[@]}"} >>"$log_file" 2>&1 < /dev/null 3>&- 4>&- 9>&- &
+        nohup env "${env_args[@]}" "$HOME/.local/bin/dsh" web --no-open ${th_args[@]+"${th_args[@]}"} >>"$log_file" 2>&1 < /dev/null 3>&- 4>&- 9>&- &
       else
         nohup "$HOME/.local/bin/dsh" --profile "$sp" >>"$log_file" 2>&1 < /dev/null 3>&- 4>&- 9>&- &
       fi
       local new_pid=$!
       printf '%s' "$new_pid" > "$pid_file"
-      local i up=0 cur=""
+      local i up=0 cur="" actual_port="$DSH_PORT"
       if [ "$is_web" -eq 1 ]; then
-        for ((i = 1; i <= 30; i++)); do
-          sleep 1
-          # 监听进程与启动前不同，才视为本次启动成功（避免把其他环境的监听误判为自己的）
-          cur="$(port_listener_pid "$DSH_PORT")"
-          if [ -n "$cur" ] && [ "$cur" != "$pre_pid" ]; then
-            up=1
-            break
-          fi
-          pid_alive "$new_pid" || break
-        done
+        if [ "$DSH_PORT" -eq 0 ]; then
+          # --port 0：端口由系统分配，从本次新写入的日志中读取实际端口
+          for ((i = 1; i <= 30; i++)); do
+            sleep 1
+            actual_port="$(detect_logged_port "$log_file" "$log_before")"
+            if [ -n "$actual_port" ]; then up=1; break; fi
+            pid_alive "$new_pid" || break
+          done
+        else
+          for ((i = 1; i <= 30; i++)); do
+            sleep 1
+            # 监听进程与启动前不同，才视为本次启动成功（避免把其他环境的监听误判为自己的）
+            cur="$(port_listener_pid "$DSH_PORT")"
+            if [ -n "$cur" ] && [ "$cur" != "$pre_pid" ]; then
+              up=1
+              break
+            fi
+            pid_alive "$new_pid" || break
+          done
+        fi
       else
         sleep 2
         if pid_alive "$new_pid"; then up=1; fi
       fi
       if [ "$up" -eq 1 ]; then
         if [ "$is_web" -eq 1 ]; then
-          ok "已在后台启动（PID ${new_pid}），端口 $DSH_PORT 监听中。"
+          ok "已在后台启动（PID ${new_pid}），端口 ${actual_port} 监听中。"
+          if [ "$DSH_PORT" -eq 0 ] && [ -n "$actual_port" ]; then
+            printf '%s' "$actual_port" > "$STATE_PORT_FILE" 2>/dev/null || true
+            info "本次由系统分配端口: ${actual_port}（已记录，可用 dshctl --url 查看访问地址）"
+          fi
         else
           ok "已在后台启动 profile「${sp}」（PID ${new_pid}，无端口监控）。"
         fi
@@ -3239,6 +3640,28 @@ version_has_profile_settings() {
   return 1
 }
 
+# dsh >= 0.2.1-alpha.2 起 webserver 拒绝通配地址，只接受一个具体 IPv4/IPv6 字面量
+# （0.2.1-alpha.1 及更早，包括 0.2.0，仍接受 0.0.0.0）
+version_has_concrete_host() {
+  local full="$1" v="${1%%-*}" pre="" major minor patch
+  case "$full" in
+    *-*) pre="${full#*-}" ;;
+  esac
+  IFS=. read -r major minor patch <<< "$v"
+  major="${major//[!0-9]/}"; minor="${minor//[!0-9]/}"; patch="${patch//[!0-9]/}"
+  [ -n "$major" ] || return 1
+  if [ "$major" -gt 0 ]; then return 0; fi
+  [ "${minor:-0}" -gt 2 ] && return 0
+  [ "${minor:-0}" -lt 2 ] && return 1
+  [ "${patch:-0}" -gt 1 ] && return 0
+  [ "${patch:-0}" -lt 1 ] && return 1
+  case "$pre" in
+    '')            return 0 ;;
+    alpha.0|alpha.1) return 1 ;;
+    *)             return 0 ;;
+  esac
+}
+
 # 当前读写目标是否为 profile patch（0.1.7+）；版本未知时按文件存在性探测
 use_profile_settings() {
   local ver=""
@@ -3732,6 +4155,7 @@ do_model_show() {
     printf '  Base 优先级: settings.yaml(llm-deepseek) > 启动环境变量 > 协议默认（.env 中设置会被拒绝启动）\n'
   fi
   printf '  Key 优先级 : 环境变量 > 凭据文件 > 项目 .env > ~/.dsh/.env\n'
+  printf '               （Web/SDK：如上；headless（0.2.1+）：环境变量 > 项目 .env > ~/.dsh/.env，不读凭据文件）\n'
 
   local f doc dup e
   local -a exist_files=()
@@ -3778,23 +4202,35 @@ do_model_check() {
   require_cmd_launcher
   [ -d "$DSH_DIR/.git" ] || die "源码目录不存在或不是 git 仓库: ${DSH_DIR}（请先运行 --install）"
 
-  local have_key=0
+  # headless（dsh 0.2.1+）只读 launch env / .env；仅有 GUI 已保存凭据时临时注入
+  local have_key=0 inject=""
   if [ -n "${DEEPSEEK_API_KEY:-}" ]; then have_key=1; fi
-  if [ "$have_key" -eq 0 ] && [ -n "$(read_yaml_value "$DSH_HOME_ABS/.credentials.yaml" 'api_?key|apikey|api-key')" ]; then have_key=1; fi
   if [ "$have_key" -eq 0 ] && [ -n "$(read_env_var "$DSH_DIR/.env" DEEPSEEK_API_KEY)" ]; then have_key=1; fi
   if [ "$have_key" -eq 0 ] && [ -n "$(read_env_var "$DSH_HOME_ABS/.env" DEEPSEEK_API_KEY)" ]; then have_key=1; fi
   if [ "$have_key" -eq 0 ]; then
-    warn "未检测到任何 API Key（环境变量/.env/凭据文件），自检可能失败。"
+    inject="$(read_yaml_value "$DSH_HOME_ABS/.credentials.yaml" 'api_?key|apikey|api-key')"
+    [ -n "$inject" ] && have_key=1
+  fi
+  if [ "$have_key" -eq 0 ]; then
+    warn "未检测到可用于 headless 的 API Key（环境变量 / .env；GUI 保存的凭据 headless 不读取），自检可能失败。"
+  elif [ -n "$inject" ]; then
+    info "headless 不读取 GUI 保存的凭据，本次临时注入该密钥自检（不修改任何文件）。"
   fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    info "[dry-run] 将执行: dsh headless \"回复 OK 即可\""
+    info "[dry-run] 将执行: dsh headless \"回复 OK 即可\"（headless 只读环境变量 / .env）"
     return 0
   fi
 
   info "发送一条最小测试消息（headless，消耗少量 token）..."
   local rc=0
-  if command -v timeout >/dev/null 2>&1; then
+  if [ -n "$inject" ]; then
+    if command -v timeout >/dev/null 2>&1; then
+      DEEPSEEK_API_KEY="$inject" timeout 180 "$HOME/.local/bin/dsh" headless "回复 OK 即可" || rc=$?
+    else
+      DEEPSEEK_API_KEY="$inject" "$HOME/.local/bin/dsh" headless "回复 OK 即可" || rc=$?
+    fi
+  elif command -v timeout >/dev/null 2>&1; then
     timeout 180 "$HOME/.local/bin/dsh" headless "回复 OK 即可" || rc=$?
   else
     "$HOME/.local/bin/dsh" headless "回复 OK 即可" || rc=$?
@@ -4285,22 +4721,40 @@ do_url() {
   step "Web UI 访问地址"
   [ -f "$WEB_LOG_FILE" ] || die "未找到服务日志（${WEB_LOG_FILE}）；请先 dshctl --start。"
   local url=""
-  url="$(grep -Eo 'http://[^ ]*\?token=[A-Za-z0-9._-]+' "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
+  # 日志为追加写入，取最后一次启动打印的带 token 地址
+  url="$(grep -Eo 'https?://[^ ]*\?token=[A-Za-z0-9._-]+' "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
   if [ -z "$url" ]; then
-    url="$(grep -Eo 'http://[0-9A-Za-z.:_-]+[^ ]*' "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
+    url="$(grep -Eo 'https?://[0-9A-Za-z.:_-]+[^ ]*' "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
   fi
   [ -n "$url" ] || die "日志中未找到访问地址（可 dshctl --logs 查看）。"
-  printf '  本机访问   : %s\n' "$url"
-  if [ -f "$WEB_LAN_PATCH" ]; then
-    local ip lan_url
-    for ip in $(hostname -I 2>/dev/null || true); do
-      case "$ip" in 127.*|*:*) continue ;; esac
-      lan_url="$(printf '%s' "$url" | sed -E "s#//[^/:]+(:[0-9]+)?#//$ip\1#")"
-      printf '  局域网访问 : %s\n' "$lan_url"
-    done
-    warn "提示：设置/模型/凭据/插件配置页面仅在 loopback（localhost）访问时可用；"
-    warn "      局域网浏览器可聊天、看插件列表，但改配置需本机访问或 SSH 隧道。"
+  printf '  访问地址   : %s\n' "$url"
+
+  local lmode="" lpub="" lhost=""
+  if [ -x "$HOME/.local/bin/dsh" ]; then
+    lmode="$(launcher_var "$HOME/.local/bin/dsh" DSH_HOST_MODE)"
+    lpub="$(launcher_var "$HOME/.local/bin/dsh" DSH_PUBLIC_URL_BAKED)"
+    lhost="$(launcher_var "$HOME/.local/bin/dsh" DSH_HOST_BAKED)"
   fi
+  [ -n "$lpub" ] && info "对外地址（--public-url）: $lpub"
+  case "$lmode" in
+    auto|explicit)
+      local ip lan_url
+      ip="${lhost:-$(detect_lan_ip)}"
+      if [ -n "$ip" ] && [ -z "$lpub" ]; then
+        lan_url="$(printf '%s' "$url" | sed -E "s#//[^/:]+(:[0-9]+)?#//$ip\1#")"
+        printf '  局域网访问 : %s\n' "$lan_url"
+      fi
+      warn "提示：通过自定义域名/反向代理访问时，需用 --trusted-host 声明该 host，否则 /api 会返回 403。"
+      ;;
+    patch)
+      local ip lan_url
+      for ip in $(hostname -I 2>/dev/null || true); do
+        case "$ip" in 127.*|*:*) continue ;; esac
+        lan_url="$(printf '%s' "$url" | sed -E "s#//[^/:]+(:[0-9]+)?#//$ip\1#")"
+        printf '  局域网访问 : %s\n' "$lan_url"
+      done
+      ;;
+  esac
   info "请使用带 token 的完整地址打开（token 是访问凭证，请勿外泄）。"
   return 0
 }
@@ -4509,10 +4963,26 @@ do_dry_run() {
   fi
 
   if [ "$DO_WEB_LAN" -eq 1 ]; then
-    printf '  局域网访问 : 将启用（写入补丁%s）\n' "$([ "$DO_LAUNCHER" -eq 1 ] && echo "并由启动器引用" || echo "；未装启动器需手动 --patch")"
+    local ver_dr="" mode_dr=""
+    ver_dr="$(installed_dsh_version || true)"
+    if [ -n "$ver_dr" ] && version_has_concrete_host "$ver_dr"; then
+      if [ -n "$DSH_HOST" ] && ! is_loopback_host "$DSH_HOST" && ! is_wildcard_host "$DSH_HOST"; then
+        mode_dr="绑定指定地址 ${DSH_HOST}"
+      else
+        mode_dr="自动绑定本机主网卡 IPv4"
+      fi
+    else
+      mode_dr="写入 0.0.0.0 通配补丁（旧版 dsh）"
+    fi
+    printf '  局域网访问 : 将启用（%s）\n' "$mode_dr"
   else
-    printf '  局域网访问 : 仅本机（如需开启加 --web-lan）\n'
+    printf '  局域网访问 : 仅本机（如需开启加 --web-lan / --host <IP>）\n'
   fi
+  [ -n "$DSH_PUBLIC_URL" ] && printf '  对外地址   : %s（--public-url）\n' "$DSH_PUBLIC_URL"
+  if [ -n "$DSH_TLS_CERT" ]; then
+    printf '  原生 HTTPS : 证书 %s\n' "$DSH_TLS_CERT"
+  fi
+  [ "${#TRUSTED_HOSTS[@]}" -gt 0 ] && printf '  信任主机   : %s\n' "${TRUSTED_HOSTS[*]}"
   printf '  启动器     : %s\n' "$([ "$DO_LAUNCHER" -eq 1 ] && echo "将安装到 $HOME/.local/bin/dsh" || echo "跳过（--no-launcher）")"
   printf '  systemd    : %s\n' "$([ "$DO_SYSTEMD" -eq 1 ] && echo "将安装并启动 dsh.service" || echo "跳过（未指定 --systemd）")"
 
@@ -4536,13 +5006,43 @@ summary() {
   local web_scope="仅本机（127.0.0.1）"
   local direct_cmd="pnpm dsh web"
   if [ "$DO_WEB_LAN" -eq 1 ]; then
-    direct_cmd="pnpm dsh web --patch \"$WEB_LAN_PATCH\""
-    if [ "$DO_LAUNCHER" -eq 1 ]; then
-      web_scope="已启用局域网访问：其他设备访问 http://<本机IP>:${DSH_PORT}（设置/模型等页面仅本机可用）"
-    else
-      web_scope="补丁已写入；本次未更新启动器，手动启动请加 --patch"
-    fi
+    case "$WEB_MODE" in
+      auto)
+        direct_cmd="pnpm dsh web --host <本机网卡IP>"
+        web_scope="已启用局域网访问：启动器自动绑定本机主网卡 IPv4（其他设备访问 http://<本机IP>:${DSH_PORT}）"
+        if [ "$DO_LAUNCHER" -ne 1 ]; then
+          web_scope="需手动以 --host <IP> 绑定网卡地址启动"
+        fi
+        ;;
+      explicit)
+        direct_cmd="pnpm dsh web --host ${WEB_MODE_VALUE}"
+        web_scope="已启用局域网访问：绑定 ${WEB_MODE_VALUE}（其他设备访问 http://${WEB_MODE_VALUE}:${DSH_PORT}）"
+        if [ "$DO_LAUNCHER" -ne 1 ]; then
+          web_scope="需手动以 --host ${WEB_MODE_VALUE} 启动"
+        fi
+        ;;
+      patch)
+        direct_cmd="pnpm dsh web --patch \"$WEB_LAN_PATCH\""
+        if [ "$DO_LAUNCHER" -eq 1 ]; then
+          web_scope="已启用局域网访问（0.0.0.0 通配，旧版 dsh）：其他设备访问 http://<本机IP>:${DSH_PORT}"
+        else
+          web_scope="补丁已写入；本次未更新启动器，手动启动请加 --patch"
+        fi
+        ;;
+      *)
+        if [ "$DO_LAUNCHER" -eq 1 ]; then
+          web_scope="已启用局域网访问：其他设备访问 http://<本机IP>:${DSH_PORT}"
+        fi
+        ;;
+    esac
   fi
+  [ -n "$DSH_PUBLIC_URL" ] && web_scope="${web_scope}；对外地址 $DSH_PUBLIC_URL"
+  [ -n "$DSH_TLS_CERT" ] && web_scope="${web_scope}；已启用原生 HTTPS"
+
+  local scheme="http" addr_host="127.0.0.1" port_disp="$DSH_PORT"
+  [ -n "$DSH_TLS_CERT" ] && scheme="https"
+  [ "$WEB_MODE" = "explicit" ] && addr_host="$WEB_MODE_VALUE"
+  [ "$DSH_PORT" -eq 0 ] && port_disp="<系统分配>"
 
   step "安装完成"
   if [ "${UPDATE_FAILED:-0}" -eq 1 ]; then
@@ -4559,7 +5059,7 @@ summary() {
   2) 直接运行 : cd "$DSH_DIR" && $direct_cmd
   3) 临时体验 : npx @deepseek-ai/dsh web
 
-Web UI 地址: http://127.0.0.1:$DSH_PORT
+Web UI 地址: $scheme://$addr_host:$port_disp
 访问范围 : $web_scope
 首次使用步骤:
   · 打开上述地址
@@ -4677,19 +5177,12 @@ main() {
     return 1
   fi
 
-  # 监听地址校验：上游 CLI 参数仅支持 127.0.0.1；0.0.0.0 由 --web-lan 的 patch 方式实现
-  if [ "$DSH_HOST" = "0.0.0.0" ]; then
-    if [ "$DO_WEB_LAN" -ne 1 ]; then
-      die "参数冲突：--host 0.0.0.0 与 --no-web-lan 同时指定。"
-    fi
-    info "--host 0.0.0.0 将以局域网访问补丁方式实现（上游 CLI 参数本身禁用 0.0.0.0）。"
-    DSH_HOST="127.0.0.1"
+  # 监听地址校验：具体 IPv4/IPv6 字面量（--host / --web-lan）；通配地址兼容为局域网请求
+  if host_is_nonloopback "$DSH_HOST" && [ "$DO_WEB_LAN" -ne 1 ]; then
+    die "参数冲突：--host $DSH_HOST 与 --no-web-lan 同时指定。"
   fi
-  if [ "$DSH_HOST" = "::" ] || [ "$DSH_HOST" = "[::]" ]; then
-    die "上游 dsh 不支持该监听地址（${DSH_HOST}）；局域网访问请用 --web-lan。"
-  fi
-  if [ "$DSH_HOST" != "127.0.0.1" ]; then
-    die "上游仅支持 --host 127.0.0.1；局域网访问请用 --web-lan（绑定 0.0.0.0）。"
+  if is_wildcard_host "$DSH_HOST"; then
+    info "--host ${DSH_HOST} 为通配地址：将以局域网访问方式实现（dsh 0.2.1+ 自动绑定本机网卡地址）。"
   fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -4728,6 +5221,9 @@ main() {
   ensure_repo
   preupgrade_backup_if_needed
 
+  # 版本就绪后再确定 Web 绑定方式（0.2.1+ 拒绝通配地址）
+  resolve_web_access_mode
+
   local pm_ver
   pm_ver="$(repo_pnpm_version)"
   info "仓库锁定的 pnpm 版本: $pm_ver"
@@ -4738,7 +5234,7 @@ main() {
   do_typecheck
   do_build
   write_env
-  install_web_lan_patch
+  setup_web_access
   install_launcher
   install_systemd
   headless_selfcheck

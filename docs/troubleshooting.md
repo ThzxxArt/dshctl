@@ -162,8 +162,9 @@ bash dshctl.sh --plugin-policy-set 0
 
 ### 插件与 dsh 版本不兼容（0.2.0+）
 
-表现为 `installation rejected: ... is incompatible with dsh ... peerDependencies`，
-安装会被回滚；已安装但未豁免的插件会在启动时被拒载（`--doctor` 可检测）。
+表现为 `installation rejected: ... is incompatible with dsh ...`（dsh 0.2.1-alpha.4 起插件
+声明的 `engines.dsh` 优先，未声明时回退 `peerDependencies`），安装会被回滚；
+已安装但未豁免的插件会在启动时被拒载（`--doctor` 可检测）。
 
 ```bash
 bash dshctl.sh --plugin-exemptions            # 查看当前豁免
@@ -180,10 +181,22 @@ bash dshctl.sh --plugin-revoke pkg@1.2.3     # 撤销
 
 ## 访问 / 安全
 
-### 局域网访问提示 `settings are unavailable`
+### Web 启动报「不允许通配地址」（dsh 0.2.1+）
 
-这是上游设计：设置/模型/凭据/插件配置页面仅限 loopback。请在本机用 `localhost` 访问，
-或使用 SSH 隧道（见 [usage.md 的局域网访问一节](usage.md#局域网访问)）。
+dsh 0.2.1-alpha.2 起 webserver 拒绝 `0.0.0.0`/`::` 等通配地址（例如
+`webserver: host "0.0.0.0" is an unspecified (wildcard) address`），必须绑定一个具体网卡地址。
+dshctl 已按版本适配：重跑 `--install`（`--web-lan` 会自动绑定本机主网卡 IP），
+或显式 `--host <本机IP>`。若此前写过旧版 `web-lan.patch.yml`，重跑安装会自动移除。
+
+### 局域网/远程访问的 host 被拒（403）
+
+GUI 的 `/api` 会校验 Host/Origin。绑定网卡 IP 本身被自动接受；通过自定义域名或反向代理
+访问时，需用 `--trusted-host <域名>` 声明（`--public-url` 只是展示，不授予信任）。
+
+### 原生 HTTPS 启动失败
+
+`--tls-cert`/`--tls-key` 必须成对且为可读的 PEM（证书链 + 未加密私钥），
+路径在安装时已转为绝对路径；启动不会回退到 HTTP。用 `dshctl --doctor` 检查证书可读性。
 
 ### 忘记访问 token
 

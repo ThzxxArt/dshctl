@@ -77,24 +77,43 @@ bash dshctl.sh --url             # 从服务日志中提取带 token 的完整�
 
 ### 局域网访问
 
+dsh 0.2.1-alpha.2 起，上游 webserver 只接受**一个具体网卡地址**，不再支持 `0.0.0.0` 通配
+（加载即报错）。dshctl 会按版本自动选择绑定方式：
+
 ```bash
+bash dshctl.sh --install --web-lan                 # 自动绑定本机主网卡 IPv4（0.2.1+）
+bash dshctl.sh --install --host 192.168.1.20       # 指定具体网卡地址（0.2.1+）
 bash dshctl.sh --install --web-lan --port 4000
-# 已安装过：重跑安装以写入启动器补丁
+# 已安装过：重跑 --install 更新启动器即可改变绑定
+# （--host / --web-lan 是安装期选项；--trusted-host 可在 --start 时临时追加）
 ```
 
 > [!WARNING]
-> 局域网内任何设备都可以访问该 Web UI（无登录鉴权），且它可以执行命令。
-> 仅限可信网络使用。
+> 局域网内任何设备都可以访问该 Web UI（无登录鉴权），且它可以执行命令。仅限可信网络使用。
 
-dsh 的「设置 / 模型 / 凭据 / 插件配置」页面按设计只在本机（loopback）访问时可用，
-局域网浏览器会提示 `settings are unavailable`。推荐用 SSH 隧道把远端端口映射到本地：
+`--trusted-host HOST` 可重复使用，把额外的主机名/地址加入 GUI 的信任列表：绑定网卡 IP 本身
+会被自动接受，通过自定义域名访问时才需要声明。旧版 dsh（≤0.2.1-alpha.1）仍会用 `0.0.0.0` 补丁，
+此时建议用 SSH 隧道把远端端口映射到本地：
 
 ```bash
 ssh -N -L 3080:127.0.0.1:3080 user@server
 # 然后在本地浏览器访问 http://127.0.0.1:3080
 ```
 
-`--trusted-host HOST` 可重复使用，把额外的主机名/地址加入 GUI 的信任列表。
+### 对外地址与原生 HTTPS（dsh 0.2.1+）
+
+```bash
+# 反向代理入口：仅用于对外展示与凭据交换，不授予信任；
+# 浏览器实际使用的 host 仍需 --trusted-host 声明
+bash dshctl.sh --install --public-url https://dsh.example.com/ --trusted-host dsh.example.com
+# 监听端直接终止 TLS（证书链 + 未加密私钥，须成对）
+bash dshctl.sh --install --tls-cert ./fullchain.pem --tls-key ./privkey.pem
+# 端口交给系统分配（启动后从日志读取实际端口）
+bash dshctl.sh --install --port 0
+```
+
+证书/私钥的相对路径会在安装时转为绝对路径。以上选项随 `--install` 写入启动器，
+也可在 `--start` 时临时指定；`--status` / `--url` / `--doctor` 会展示当前绑定、对外地址与 HTTPS 状态。
 
 ## 4. 插件管理
 
@@ -128,7 +147,8 @@ bash dshctl.sh --plugin-policy-reset     # 恢复 pnpm 默认（1440 分钟）
 
 ### 插件兼容性门禁（dsh 0.2.0+）
 
-dsh 0.2.0 起会按插件的 `peerDependencies` 校验 dsh 版本：不兼容的安装会被拒绝并回滚，
+dsh 0.2.0 起会校验插件的 DSH 版本兼容性（dsh 0.2.1-alpha.4 起优先看插件声明的
+`engines.dsh`，未声明时回退 `peerDependencies`）：不兼容的安装会被拒绝并回滚，
 已安装但未豁免的插件会被启动拒载。dshctl 提供对应的豁免管理：
 
 ```bash

@@ -7,6 +7,39 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-16
+
+适配 DeepSeek Harness 0.2.1（当前最新 `dsh-v0.2.1-alpha.4`），并新增 Web 对外访问能力。
+
+### 修复（破坏性变更适配）
+
+- **`--web-lan` 重写以适配 dsh 0.2.1**：0.2.1-alpha.2 起上游 webserver 拒绝
+  `0.0.0.0` 等通配地址（加载即报错，导致 Web 启动失败）。现在按版本分流：
+  0.2.1-alpha.2+ 自动绑定本机主网卡 IPv4（启动时探测，网卡变化自动重试）；
+  ≤0.2.1-alpha.1（含 0.2.0）仍沿用 `0.0.0.0` 补丁方式。
+- **headless 凭据语义修正**：dsh 0.2.1-alpha.3 起 headless 不再读取 GUI 保存的凭据
+  （只读环境变量 / `.env`）。`--model-check` 与 `--headless-selfcheck` 不再把
+  `~/.dsh/.credentials.yaml` 当作 headless 可用密钥，必要时临时注入以免自检假阴性。
+- **`--port 0` 实际端口探测**：只读取本次启动新写入的日志（避免读到上一次运行的历史 URL），
+  并在启动成功后记录实际端口，`--status` / `--url` 随之准确。
+- **`--url` / `--doctor` 健壮性**：`--url` 取日志中最新一次启动的地址（不再被历史地址干扰）；
+  `--doctor` 的一句「Web UI 可达性」按真实绑定地址与协议（含 HTTPS）探测，并绕过代理。
+
+### 新增
+
+- **`--host HOST`**：绑定一个具体 IPv4/IPv6 网卡地址（dsh 0.2.1+；通配地址仍兼容为局域网请求）。
+- **`--public-url URL`**：反向代理对外地址（`http(s)://`，可带路径前缀）。
+- **`--tls-cert FILE` / `--tls-key FILE`**：原生 HTTPS 证书链与私钥（须成对；相对路径安装时转绝对）。
+- **`--port 0`**：由系统分配空闲端口，启动后从日志读取实际端口。
+- 以上选项随 `--install` 写入启动器，也支持 `--start` 临时生效；`--status` / `--url` / `--doctor`
+  展示局域网绑定、对外地址、HTTPS 与信任主机。
+
+### 变更
+
+- 插件兼容性说明更新为 0.2.1+ 优先 `engines.dsh`、未声明时回退 `peerDependencies`。
+- `DSH_PNPM_FALLBACK` 默认值更新为 `11.28.5`（与上游仓库锁定版本一致）。
+- `--web-lan` 不再声称「设置/模型等页面仅 loopback 可用」（0.2.1 已支持非 loopback / 反向代理访问）。
+
 ## [1.4.2] - 2026-10-12
 
 ### 新增
@@ -89,7 +122,8 @@
 - 增加 ShellCheck 静态检查、CLI 测试套件与 GitHub Actions CI；发布工作流在打 tag 时
   自动校验版本一致性并创建 Release。
 
-[Unreleased]: https://github.com/ThzxxArt/dshctl/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/ThzxxArt/dshctl/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.5.0
 [1.4.2]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.2
 [1.4.1]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.1
 [1.4.0]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.0

@@ -20,9 +20,9 @@ run_dshctl --install --port abc
 assert_rc 1 "非法端口（非数字）"
 assert_output_contains "必须是数字" "端口非数字提示"
 
-run_dshctl --install --port 0
-assert_rc 1 "端口 0 越界"
-assert_output_contains "超出范围" "端口越界提示"
+run_dshctl --install --dry-run --port 0
+assert_rc 0 "端口 0 合法（由系统分配）"
+assert_stdout_contains "安装计划预览" "端口 0 仍可预览安装"
 
 run_dshctl --install --port 70000
 assert_rc 1 "端口 70000 越界"

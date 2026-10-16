@@ -40,6 +40,7 @@ dshctl 把这些收敛为一条命令，并且刻意做成**可反复执行**的
 - **增量与安全**：源码未变化自动跳过 install/build；升级前自动备份 `~/.dsh`；
   所有破坏性操作需确认，均支持 `--dry-run` 预览。
 - **运维闭环**：`--status` / `--doctor` / `--start|--stop|--restart|--logs`，可选 `systemd --user` 常驻。
+- **访问与暴露**：`--url` 打印带 token 地址；`--web-lan` / `--host <IP>` 局域网绑定（按 dsh 版本自动选择具体网卡地址或旧版 `0.0.0.0` 补丁）；`--public-url` 反向代理对外地址；`--tls-cert` / `--tls-key` 原生 HTTPS；`--port 0` 系统分配端口。
 - **插件管理**：profile 级增删改查，pnpm 11 供应链策略（`minimumReleaseAge`）的审计、等待时间预估与锁文件重建；支持 dsh 0.2.0+ 的插件兼容性门禁（精确版本豁免的查询/授予/撤销）。
 - **模型排障**：针对 dsh 0.1.6+ 的 Messages 协议变化，检查/修复非法的 `DEEPSEEK_BASE_URL`；适配 0.1.7+ 的配置迁移（profile 的 `cordis.patch.yml`）。
 - **数据维护**：备份、恢复、旧会话归档、可重建缓存清理，全部带自动备份。
@@ -111,7 +112,7 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | 模型 | `--model-show` `--model-check` `--model-fix` `--model-set-base URL` | Base URL 规范检查与修复（0.1.7+ 配置在 profile） |
 | 数据 | `--data-backup` `--data-restore FILE` `--data-archive-sessions` `--data-prune` | 备份 / 恢复 / 旧会话归档 / 缓存清理 |
 | 版本 | `--rollback [REF]` `--upgrade-check` | 回退与升级检查 |
-| 访问 | `--url` `--web-lan` `--trusted-host HOST` | 打印带 token 的地址；局域网访问 |
+| 访问 | `--url` `--web-lan` `--host IP` `--public-url URL` `--tls-cert FILE` `--tls-key FILE` `--trusted-host HOST` | 打印带 token 的地址；局域网/对外访问与原生 HTTPS |
 | 备份管理 | `--backups-list` `--backups-prune [N]` | 列出 / 清理 dshctl 产生的备份 |
 | 网络 | `--git-proxy URL` `--github-mirror URL` `--npm-mirror URL` `--node-mirror URL` `--no-proxy` `--no-mirror` | 代理与镜像控制 |
 | 卸载 | `--uninstall` `--purge` `--register` `--unregister` | 部分/完全卸载；全局命令注册 |
@@ -129,9 +130,11 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | `DSH_REF` | `master` | 分支 / tag / commit |
 | `DSH_DIR` | `~/deepseek-harness` | 源码目录 |
 | `DSH_NODE_MAJOR` | `24` | 自动安装的 Node.js 主版本 |
-| `DSH_PNPM_FALLBACK` | `11.7.0` | 无法从仓库读取 pnpm 版本时的兜底 |
+| `DSH_PNPM_FALLBACK` | `11.28.5` | 无法从仓库读取 pnpm 版本时的兜底 |
 | `DSH_HOME` | `~/.dsh` | dsh 运行数据目录 |
-| `DSH_PORT` / `DSH_HOST` | `3080` / `127.0.0.1` | Web UI 监听 |
+| `DSH_PORT` / `DSH_HOST` | `3080` / `127.0.0.1` | Web UI 监听（`--host` 仅接受具体 IPv4/IPv6；`0` 端口表示系统分配） |
+| `DSH_PUBLIC_URL` | 空 | 反向代理对外地址（`--public-url`，dsh 0.2.1+） |
+| `DSH_TLS_CERT` / `DSH_TLS_KEY` | 空 | 原生 HTTPS 证书链 / 私钥（dsh 0.2.1+） |
 | `DSH_API_KEY` / `DSH_BASE_URL` | 空 | 写入 `.env` / profile 配置（0.1.6 及以下为 `settings.yaml`） |
 | `DSH_GIT_PROXY` / `GIT_PROXY` | 空 | HTTP 代理（也读取 `https_proxy`） |
 | `DSH_GITHUB_MIRROR` | 空 | GitHub 镜像加速 |
@@ -150,13 +153,14 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | `~/.dsh/settings.yaml` | 旧版全局设置（≤0.1.6；升级到 0.1.7+ 时自动导入并改名为 `.imported`） |
 | `~/.local/state/dsh` | 服务状态：`web.pid` `web.log` `port` 安装版本记录 |
 | `~/.dshctl.log` | dshctl 操作日志（轮转保留 `.1`） |
-| `~/.local/share/dsh/web-lan.patch.yml` | 局域网访问补丁（`--web-lan` 时生成） |
+| `~/.local/share/dsh/web-lan.patch.yml` | 局域网访问补丁（仅旧版 dsh ≤0.2.1-alpha.1 的 `--web-lan` 时生成） |
 | `~/.config/systemd/user/dsh.service` | systemd --user 单元（`--systemd` 时生成） |
 
 ## 安全说明
 
-- **局域网访问**：`--web-lan` 会把可执行命令的 Web UI（无登录鉴权）暴露给同网段设备，仅限可信网络；
-  且 dsh 的「设置 / 模型 / 凭据 / 插件配置」页面按设计只在本机（loopback）访问时可用。
+- **局域网/远程访问**：`--web-lan` / `--host <IP>` 会把可执行命令的 Web UI（无登录鉴权）
+  暴露给同网段或（配合反向代理/`--public-url` 时）更广的范围，仅限可信网络；
+  通过自定义域名访问时需用 `--trusted-host` 声明。原生 HTTPS 用 `--tls-cert`/`--tls-key`。
 - **密钥与凭据**：`.env` 写入后权限为 `600`；备份文件同样为 `600`；脚本不会向任何第三方上报数据。
 - **插件即代码**：安装插件等于引入可执行代码（`--plugin-add` 会显式警告），请确认来源可信。
 - **危险操作防护**：删除路径有系统级防护（拒绝 `/`、`$HOME`、顶层目录），卸载/恢复/归档均需确认。
@@ -170,7 +174,10 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 - dsh 启动报 `.env` 中的 `DEEPSEEK_BASE_URL` 非法 → `dshctl --model-fix`
 - 插件安装被 pnpm 供应链策略拦截 → `dshctl --plugin-policy` / `--plugin-repair`
 - 插件与 dsh 版本不兼容（0.2.0+）→ `dshctl --plugin-exemptions` / `--plugin-allow`
-- 端口被占用（WSL 镜像网络下可能是主机/其他发行版）→ `dshctl --doctor` 或 `--port`
+- Web 启动报「不允许通配地址」（0.2.1+）→ 重跑 `dshctl --install`（`--web-lan` 自动绑定本机网卡 IP）或 `--host <IP>`
+- 局域网/远程访问 `/api` 返回 403 → 用 `--trusted-host <域名>` 声明浏览器使用的 host
+- 想要对外 HTTPS / 反向代理 → `dshctl --install --public-url https://…/ --tls-cert … --tls-key …`
+- 端口被占用（WSL 镜像网络下可能是主机/其他发行版）→ `dshctl --doctor` 或 `--port`（`--port 0` 交给系统分配）
 
 ## 开发与贡献
 

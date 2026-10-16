@@ -32,6 +32,9 @@ dshctl --status / --doctor / --restart / --logs
   backs up `~/.dsh` before upgrades, prints the failing line on errors.
 - China-network friendly: proxy auto-detection, GitHub mirror, npm/Node mirror fallback.
 - Operations: `--status`, `--doctor`, `--start|--stop|--restart|--logs`, optional `systemd --user`.
+- Web exposure: `--url`, `--web-lan` / `--host <IP>` (binds a concrete interface address on
+  dsh 0.2.1+, or the `0.0.0.0` patch on older dsh), `--public-url` for reverse-proxy fronting,
+  `--tls-cert`/`--tls-key` native HTTPS, `--port 0` for an OS-assigned port.
 - Plugin management per profile, including pnpm `minimumReleaseAge` policy audit, lockfile
   repair, and the dsh 0.2.0+ plugin compatibility gate (exact-version exemption management).
 - Model config checks/fixes for the dsh 0.1.6+ Messages protocol (Base URL must not be in `.env`),
@@ -81,7 +84,7 @@ bash dshctl.sh --purge -y         # full cleanup (backs up ~/.dsh first)
 | Model | `--model-show`, `--model-check`, `--model-fix`, `--model-set-base URL` |
 | Data | `--data-backup`, `--data-restore FILE`, `--data-archive-sessions`, `--data-prune` |
 | Versions | `--rollback [REF]`, `--upgrade-check`, `--backups-list`, `--backups-prune [N]` |
-| Web access | `--url`, `--web-lan`, `--trusted-host HOST` |
+| Web access | `--url`, `--web-lan`, `--host IP`, `--public-url URL`, `--tls-cert FILE`, `--tls-key FILE`, `--trusted-host HOST` |
 | Network | `--git-proxy URL`, `--github-mirror URL`, `--npm-mirror URL`, `--node-mirror URL`, `--no-proxy`, `--no-mirror` |
 | Lifecycle | `--register`, `--unregister`, `--uninstall`, `--purge` |
 | Common | `-y`, `--dry-run`, `--log FILE`, `-V`, `-h` |
@@ -99,9 +102,10 @@ The primary documentation is written in Chinese:
 
 ## Security
 
-`--web-lan` exposes a shell-capable web UI without authentication — use it only on trusted
-networks. Secrets are stored with `600` permissions and never uploaded. See [SECURITY.md](SECURITY.md)
-for vulnerability reporting.
+`--web-lan` / `--host <IP>` (and `--public-url` behind a reverse proxy) expose a
+shell-capable web UI without authentication — use them only on trusted networks, and name
+custom domains with `--trusted-host`. Secrets are stored with `600` permissions and never
+uploaded. See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 
