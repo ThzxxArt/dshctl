@@ -86,6 +86,8 @@ dshctl --status
 
 1. 打开启动器输出的地址：`http://127.0.0.1:3080`（带 token 的完整地址可用 `dshctl --url` 查看）；
 2. 「设置 → 模型」填入 DeepSeek API Key 并保存（热生效，无需重启）；
+   - 仅本机 HTTP 访问时（dsh 0.2.1+），也可在「设置 → 账号」登录 DeepSeek 账号，无需 API Key；
+     经 `--web-lan` / `--public-url` / `--tls-cert` / `--trusted-host` 暴露的部署仍须使用 API Key；
 3. 点击「选择工作区」，添加并选中一个项目目录；
 4. 在会话输入框开始对话。
 

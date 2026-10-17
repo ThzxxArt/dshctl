@@ -7,6 +7,35 @@
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-17
+
+核对 DeepSeek Harness 0.2.1 候选版（`dsh-v0.2.1-rc.1` / `dsh-v0.2.1-rc.2`）。
+结论：脚本依赖的上游接口面（`dsh web` 参数、`dsh plugin` 子命令与豁免命令、profile 目录结构、
+兼容门禁、Node/pnpm 版本要求、构建脚本、会话格式）自 `0.2.1-alpha.4` 起**无变化**，
+本次无需兼容性改造；`rc.1` 相对 `alpha.5` 仅改动各 `package.json` 的版本号。
+
+### 修复
+
+- **`--upgrade-check` 漏报同 `X.Y.Z` 内的预发布升级**：`version_ge` 原先只比较前三个数字段、
+  忽略预发布后缀，会把 `0.2.1-alpha.5` 判成「不低于上游最新 tag」（上游为 `0.2.1-rc.2`）。
+  现按 semver 2.0.0 预发布优先级比较：数字段相同后，正式版 > 预发布版；两者都带预发布时
+  逐段比较——数字标识符按数值（忽略前导零）、数字标识符 < 非数字标识符、非数字标识符按
+  ASCII 顺序（`LC_ALL=C` 固定，不受语言环境影响），公共前缀相同时标识符多者更大。
+- **上游 tag 定序统一到同一实现**：`latest_upstream_tag` 原先依赖 `sort -V`，而 GNU 与 BSD
+  （macOS）的 `-V` 语义不同——BSD 把预发布后缀当字符串比较，`alpha.10` 会排在 `alpha.9` 之前，
+  使 `--upgrade-check` 与构建失败指引在 macOS 上可能锁定过旧的 tag。现改为复用 `version_ge`
+  取最大值，版本定序只有一个归属实现。新增 `tests/test_version_compare.sh` 覆盖定序表与
+  `--upgrade-check` 结论行（stub git，不触网）。
+
+### 变更
+
+- 「临时体验」提示由 `npx @deepseek-ai/dsh web` 改为 `npx @deepseek-ai/dsh@next web`：
+  npm 的 `latest` 标签仍停在 `0.2.0-rc.2`，0.2.1 候选线挂在 `next` 上。
+- 首次使用步骤补充账号登录路径：仅本机 HTTP 访问时（dsh 0.2.1+）可在「设置 → 账号」登录
+  DeepSeek 账号而无需 API Key；经 `--web-lan` / `--public-url` / `--tls-cert` / `--trusted-host`
+  暴露的部署仍须使用 API Key（上游只接受回环 HTTP 作为登录回调 origin）。README（中/英）同步。
+- 插件变更后的重启说明放宽：dsh 0.2.1+ 支持依赖同步与热重载，dshctl 仍会重启服务以确保生效。
+
 ## [1.5.0] - 2026-10-16
 
 适配 DeepSeek Harness 0.2.1（当前最新 `dsh-v0.2.1-alpha.4`），并新增 Web 对外访问能力。

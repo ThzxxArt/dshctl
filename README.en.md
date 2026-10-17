@@ -59,7 +59,10 @@ dshctl --status
 ```
 
 Then open `http://127.0.0.1:3080` (use `dshctl --url` for the tokenized URL), fill in your
-API key under Settings → Model, and select a workspace directory.
+API key under Settings → Model, and select a workspace directory. On a loopback HTTP origin
+(dsh 0.2.1+), Settings → Account can sign in to a DeepSeek account instead of using an API key;
+deployments exposed through `--web-lan` / `--public-url` / `--tls-cert` / `--trusted-host` still
+need an API key.
 
 Update, rollback and uninstall:
 

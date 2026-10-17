@@ -19,7 +19,7 @@
 #  运维能力：--status 状态 / --doctor 体检 / --start|--stop|--restart|--logs 服务控制
 #  插件能力：--plugin-list / --plugin-add / --plugin-remove / --plugin-update / --plugin-why
 #             / --plugin-repair / --plugin-policy* / --plugin-exemptions / --plugin-allow / --plugin-revoke
-#             （--profile 指定 profile，默认 web；插件变更需重启服务生效）
+#             （--profile 指定 profile，默认 web；插件变更后按需重启服务，0.2.1+ 可热重载）
 #  模型维护：--model-show / --model-check / --model-fix / --model-set-base
 #             （0.1.6 起 Messages 协议；0.1.7+ 配置位于 profile 的 cordis.patch.yml）
 #  访问能力：--url / --web-lan / --host <IP> / --public-url / --tls-cert / --tls-key / --trusted-host
@@ -118,7 +118,7 @@ MODEL_ACTION=""
 MODEL_BASE_URL=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.5.0"
+DSHCTL_VERSION="1.5.1"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -470,7 +470,7 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --log FILE            指定日志文件（默认: ~/.dshctl.log）
       --log-max-mb N        日志轮转阈值 MB（默认: 5，0 关闭）
 
-插件管理（需先 --install；bundle 插件变更后需重启服务才生效）:
+插件管理（需先 --install；dsh 0.2.1+ 变更可热重载，未生效时 dshctl 会重启服务）:
       --profile NAME        指定 profile（插件与模型操作默认 web；服务控制可用其他 profile）
       说明：插件安装/卸载/更新完成后会检测服务状态：交互时询问是否重启，
             -y 或非交互环境自动重启；安装插件 = 安装可执行代码，请确认来源可信。
@@ -3398,9 +3398,9 @@ maybe_restart_service() { # $1=变更描述（默认"插件变更"） $2=force�
   local do_it=0
   if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
     do_it=1
-    info "${what}需重启服务才生效（-y / 非交互环境：自动重启）"
+    info "${what}：dsh 0.2.1+ 可热重载，dshctl 仍会重启服务以确保生效（-y / 非交互环境：自动重启）"
   else
-    printf '%s需重启服务才生效，现在重启？[Y/n] ' "$what"
+    printf '%s：dsh 0.2.1+ 可热重载，是否重启服务以确保生效？[Y/n] ' "$what"
     local ans=""
     read -r ans || true
     case "$ans" in
@@ -4612,28 +4612,78 @@ do_data_prune() {
 # -----------------------------------------------------------------------------
 # 版本管理（历史 / 回退 / 升级检查）
 # -----------------------------------------------------------------------------
-version_ge() { # $1 >= $2（只比较前三个数字段，忽略预发布后缀）
-  local a="${1%%-*}" b="${2%%-*}" i
+# 版本比较：$1 >= $2（semver 语义，含预发布段）
+#   数字段按数值比较；数字段相同时：正式版 > 预发布版；两者都带预发布时按
+#   semver 2.0.0 §11 逐段比较——数字标识符按数值（忽略前导零）、数字标识符 <
+#   非数字标识符、非数字标识符按 ASCII 顺序，公共前缀相同时标识符多者更大。
+#   入参为裸版本号（如 0.2.1-rc.2）；上游 tag 的 dsh-v 前缀由调用方剥离。
+version_ge() {
+  local a="$1" b="$2" apre="" bpre=""
+  case "$a" in *-*) apre="${a#*-}"; a="${a%%-*}" ;; esac
+  case "$b" in *-*) bpre="${b#*-}"; b="${b%%-*}" ;; esac
+
+  local i x y
   local -a av bv
   IFS=. read -r -a av <<< "$a"
   IFS=. read -r -a bv <<< "$b"
   for i in 0 1 2; do
-    local x="${av[$i]:-0}" y="${bv[$i]:-0}"
+    x="${av[$i]:-0}"; y="${bv[$i]:-0}"
     x="${x//[!0-9]/}"; y="${y//[!0-9]/}"
     x="${x:-0}"; y="${y:-0}"
     if [ "$x" -gt "$y" ]; then return 0; fi
     if [ "$x" -lt "$y" ]; then return 1; fi
   done
-  return 0
+
+  # 数字段相同：由预发布段定序（此前只看数字段，0.2.1-alpha.5 会被误判为不低于 0.2.1-rc.2）
+  if [ -z "$apre" ] && [ -z "$bpre" ]; then return 0; fi
+  if [ -z "$apre" ]; then return 0; fi   # 正式版 > 预发布版
+  if [ -z "$bpre" ]; then return 1; fi
+
+  local -a ap bp
+  IFS=. read -r -a ap <<< "$apre"
+  IFS=. read -r -a bp <<< "$bpre"
+  local n=${#ap[@]} m=${#bp[@]} limit ai bi an bn
+  limit=$((n < m ? n : m))
+  for ((i = 0; i < limit; i++)); do
+    ai="${ap[$i]}"; bi="${bp[$i]}"
+    if [ "$ai" = "$bi" ]; then continue; fi
+    an=0; bn=0
+    case "$ai" in ''|*[!0-9]*) ;; *) an=1 ;; esac
+    case "$bi" in ''|*[!0-9]*) ;; *) bn=1 ;; esac
+    if [ "$an" -eq 1 ] && [ "$bn" -eq 1 ]; then
+      x="$(printf '%s' "$ai" | sed 's/^0*//')"; x="${x:-0}"
+      y="$(printf '%s' "$bi" | sed 's/^0*//')"; y="${y:-0}"
+      if [ "$x" -gt "$y" ]; then return 0; fi
+      return 1
+    fi
+    if [ "$an" -eq 1 ]; then return 1; fi   # 数字标识符 < 非数字标识符
+    if [ "$bn" -eq 1 ]; then return 0; fi
+    # 非数字标识符：LC_ALL=C 固定为 ASCII 顺序，不受当前语言环境影响
+    if [ "$(printf '%s\n%s\n' "$ai" "$bi" | LC_ALL=C sort | head -n1)" = "$ai" ]; then
+      return 1
+    fi
+    return 0
+  done
+  # 公共前缀相同：标识符多者更大；数量相同即相等
+  if [ "$n" -ge "$m" ]; then return 0; fi
+  return 1
 }
 
 # 最新上游 tag（dsh-v*；网络不可达或无仓库时输出空）
+# 定序复用 version_ge：sort -V 在 GNU 与 BSD 上语义不同（BSD 把预发布后缀当字符串比较，
+# 会把 alpha.10 排在 alpha.9 之前），统一走 semver 比较可避免平台差异。
 latest_upstream_tag() {
   [ -d "$DSH_DIR/.git" ] || return 0
-  local tags=""
+  local tags="" best="" t
   tags="$(git -C "$DSH_DIR" ls-remote --tags origin 'dsh-v*' 2>/dev/null || true)"
   [ -n "$tags" ] || return 0
-  printf '%s\n' "$tags" | grep -vF '^{}' | sed -E 's#.*refs/tags/([^ ]*).*#\1#' | sort -V | tail -n1
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    t="${t#dsh-v}"
+    if [ -z "$best" ] || version_ge "$t" "$best"; then best="$t"; fi
+  done <<< "$(printf '%s\n' "$tags" | grep -vF '^{}' | sed -E 's#.*refs/tags/([^ ]*).*#\1#' | sed 's/^dsh-v//')"
+  [ -n "$best" ] || return 0
+  printf 'dsh-v%s' "$best"
   return 0
 }
 
@@ -5057,13 +5107,15 @@ summary() {
 启动方式:
   1) 启动器   : dsh web
   2) 直接运行 : cd "$DSH_DIR" && $direct_cmd
-  3) 临时体验 : npx @deepseek-ai/dsh web
+  3) 临时体验 : npx @deepseek-ai/dsh@next web（npm 的 latest 标签落后于仓库线）
 
 Web UI 地址: $scheme://$addr_host:$port_disp
 访问范围 : $web_scope
 首次使用步骤:
   · 打开上述地址
   · 设置 → 模型，填入 DeepSeek API Key 并保存（立即生效，无需重启）
+  · 或：仅本机 HTTP 访问时（dsh 0.2.1+）在「设置 → 账号」登录 DeepSeek 账号，
+    无需 API Key；局域网 / 反向代理 / HTTPS 部署仍须用 API Key
   · 点击“选择工作区”，添加并选中一个项目目录
   · 选中工作区后，会话输入框即可使用
 

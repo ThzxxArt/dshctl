@@ -208,6 +208,9 @@ bash dshctl.sh --rollback         # 回退到上一次成功安装的版本并�
 bash dshctl.sh --rollback v0.1.2-alpha.1
 ```
 
+`--upgrade-check` 按 semver 比较本地版本与上游最新 `dsh-v*` tag，**含预发布优先级**
+（`0.2.1-alpha.5 < 0.2.1-rc.1 < 0.2.1`），因此 0.2.1 的 alpha → rc 推进不会被漏报。
+
 回退只改变源码版本，**不会**回滚 `~/.dsh` 运行数据；新版本写入的数据可能与旧版本不兼容。
 尤其注意：0.1.7+ 已把设置迁移为 profile 配置、0.2.0 会话为 v4 格式，回退后旧版本可能
 无法使用，执行前请先 `--data-backup`。安装历史记录保存在

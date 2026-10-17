@@ -48,7 +48,7 @@ dshctl/
 | 插件 | `resolve_plugin_spec` `plugin_run` `do_plugin_*` `plugin_failure_hint` | profile 级管理；策略违规等待时间精确计算；0.2.0+ 兼容性豁免（exemptions / allow / revoke） |
 | 模型 | `mask_secret` `settings_write_baseurl` `patch_read_llm_value` `patch_set_llm_baseurl` `patch_delete_llm_key` `use_profile_settings` `model_*` `do_model_*` | 0.1.7+ 配置位于 profile 的 `cordis.patch.yml`，≤0.1.6 为 `settings.yaml`；协议兼容检查与修复 |
 | 数据 | `do_data_backup` `do_data_restore` `do_data_archive_sessions` `do_data_prune` | 破坏性操作全部带确认与现状备份 |
-| 版本 | `version_ge` `do_upgrade_check` `rollback_prev_target` `do_rollback_prepare` | 基于 `installed.history` 的历史回退 |
+| 版本 | `version_ge` `latest_upstream_tag` `do_upgrade_check` `rollback_prev_target` `do_rollback_prepare` | semver 比较（含预发布段）同时用于上游 tag 定序；基于 `installed.history` 的历史回退 |
 | 访问/备份 | `do_url` `backup_globs` `do_backups_list` `do_backups_prune` | 备份保留策略 |
 | 主流程 | `main` | 只读命令不取锁；写命令 `acquire_lock`；安装/更新必须显式 `--install` |
 
