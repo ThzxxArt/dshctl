@@ -101,14 +101,18 @@ The primary documentation is written in Chinese:
 - [README.md](README.md) — full feature and configuration reference
 - [docs/usage.md](docs/usage.md) — scenario-based usage guide
 - [docs/troubleshooting.md](docs/troubleshooting.md) — FAQ and troubleshooting
+- [docs/reverse-proxy.md](docs/reverse-proxy.md) — reverse proxy (nginx) requirements and template
 - [docs/development.md](docs/development.md) — repository layout, tests and release process
 
 ## Security
 
 `--web-lan` / `--host <IP>` (and `--public-url` behind a reverse proxy) expose a
-shell-capable web UI without authentication — use them only on trusted networks, and name
-custom domains with `--trusted-host`. Secrets are stored with `600` permissions and never
-uploaded. See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+shell-capable web UI to a wider network — use them only on trusted networks, and name
+custom domains with `--trusted-host`. dsh itself gates first access with a launch token
+(open the full `?token=` URL; `dshctl --url` prints it), but the listening port is not
+protected: never expose it directly to the internet, and add your own authentication at
+the proxy. Secrets are stored with `600` permissions and never uploaded. See
+[SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 

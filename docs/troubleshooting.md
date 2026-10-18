@@ -193,6 +193,32 @@ dshctl 已按版本适配：重跑 `--install`（`--web-lan` 会自动绑定本�
 GUI 的 `/api` 会校验 Host/Origin。绑定网卡 IP 本身被自动接受；通过自定义域名或反向代理
 访问时，需用 `--trusted-host <域名>` 声明（`--public-url` 只是展示，不授予信任）。
 
+### 反向代理访问报「dsh web authentication required」
+
+这是**没带 token** 的默认回应，不是故障：dsh 只认启动输出里那条带 `?token=` 的完整地址，
+token 无法用反代参数关掉。
+
+```bash
+bash dshctl.sh --url        # 打印带 token 的完整访问地址
+```
+
+若**带上 token 仍然**失败，按顺序查：
+
+1. 反代是否把 `Host` 改写成了后端地址（必须原样保留浏览器可见 Host）——
+   后果是每次访问都要求重新认证，且 `/api` 返回 403；
+2. 反代是否剥掉了挂载前缀（`--public-url https://host/ui/` 时，`/ui/api/...`
+   必须以 `/api/...` 抵达后端）；
+3. 是否用 `--trusted-host` 点名了浏览器实际使用的 authority。
+
+完整要求、nginx 模板与验证清单见 [reverse-proxy.md](reverse-proxy.md)。
+
+### 浏览器控制台报 CSP 错误（字体 / eval 被拦）
+
+`Refused to load the font 'data:font/...'`、`EvalError: ... 'unsafe-eval' is not an allowed source`
+都来自**反代自己添加的 `Content-Security-Policy` 响应头**：dsh 不下发 CSP，其前端需要
+`font-src 'self' data:` 与 `'unsafe-eval'`。移除该响应头，或按
+[reverse-proxy.md](reverse-proxy.md#4-如果确实要保留-csp) 的最小可用 CSP 调整。
+
 ### 原生 HTTPS 启动失败
 
 `--tls-cert`/`--tls-key` 必须成对且为可读的 PEM（证书链 + 未加密私钥），
@@ -203,6 +229,9 @@ GUI 的 `/api` 会校验 Host/Origin。绑定网卡 IP 本身被自动接受；�
 ```bash
 bash dshctl.sh --url
 ```
+
+反向代理场景同理：把 `--url` 输出的完整地址（含 `?token=`）作为**首次访问**的地址，
+token 换成会话 cookie 之后，后续用裸域名访问即可。
 
 ### 如何确认脚本没有做多余的事
 

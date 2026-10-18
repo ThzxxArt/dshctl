@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **反向代理接入手册** `docs/reverse-proxy.md`：实测确认三类互不相同的故障源——
+  dsh 的启动 token（首次访问必须带 `?token=`，反代参数无法关闭）、dsh 的 Host 栅栏
+  （`--trusted-host` 只放行、不认证）、反代自身的 basic auth 与 CSP 响应头
+  （会拦下 `/manifest.webmanifest` 等免鉴权静态资源，并拦截前端所需的内联字体与 `eval`）。
+  含可直接套用的完整 nginx 模板（basic auth 放行 / WebSocket 升级 / 后端故障页）、
+  `add_header` 的追加与继承语义、最小可用 CSP、六条 curl 验证清单与控制台现象对照表。
+- 同一手册另补两项反代视角的实测结论：**dsh 自身不设防的路径**——`/plugins/events` 与
+  `/plugins/*` 免凭证返回完整插件清单与插件源码（11 条路径逐一实测），故反代认证层往往是
+  唯一覆盖它的那一层；**token 与 cookie 的生命周期**——token 每次启动重新生成且会进反代
+  访问日志，cookie 默认 30 天、绑定 authority、不带 `Secure`（须以 HSTS 补偿），
+  并给出访问日志脱敏写法。
+- 排障手册新增「反向代理访问报 dsh web authentication required」「浏览器控制台报 CSP 错误」
+  两条；`--url` 条目补充反代场景说明；使用手册对外地址一节补充反代要点。
+
+### 修复
+
+- **README 安全说明的事实错误**：原称 Web UI「无登录鉴权」，实际 dsh 有启动 token 认证门
+  （首次访问须用带 `?token=` 的完整地址）。现改为「有 token 认证门，但监听端口本身不受保护」，
+  并明确经反代暴露时建议在反代再加一道认证。中英文同步。
+
 ## [1.5.1] - 2026-10-17
 
 核对 DeepSeek Harness 0.2.1 候选版（`dsh-v0.2.1-rc.1` / `dsh-v0.2.1-rc.2`）。

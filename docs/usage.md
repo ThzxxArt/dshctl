@@ -115,6 +115,11 @@ bash dshctl.sh --install --port 0
 证书/私钥的相对路径会在安装时转为绝对路径。以上选项随 `--install` 写入启动器，
 也可在 `--start` 时临时指定；`--status` / `--url` / `--doctor` 会展示当前绑定、对外地址与 HTTPS 状态。
 
+经反向代理暴露时，首次访问必须使用带 `?token=` 的完整地址（`dshctl --url` 可取，
+token 会换成会话 cookie，之后可用裸域名）；反代还需保留浏览器可见的 `Host`、转发 WebSocket
+升级头，并且不要在反代上加 CSP 响应头。完整要求、nginx 模板与验证清单见
+[reverse-proxy.md](reverse-proxy.md)。
+
 ## 4. 插件管理
 
 插件按 profile 管理（默认 `web`），变更后需重启服务生效（交互询问，`-y` 自动重启）：

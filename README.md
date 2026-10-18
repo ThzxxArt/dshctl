@@ -160,9 +160,12 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 
 ## 安全说明
 
-- **局域网/远程访问**：`--web-lan` / `--host <IP>` 会把可执行命令的 Web UI（无登录鉴权）
+- **局域网/远程访问**：`--web-lan` / `--host <IP>` 会把可执行命令的 Web UI
   暴露给同网段或（配合反向代理/`--public-url` 时）更广的范围，仅限可信网络；
-  通过自定义域名访问时需用 `--trusted-host` 声明。原生 HTTPS 用 `--tls-cert`/`--tls-key`。
+  dsh 自身有启动 token 认证门（首次访问须用带 `?token=` 的完整地址，`dshctl --url` 可取），
+  但**监听端口本身不受保护**——请勿直接把端口暴露到公网；经反向代理暴露时，
+  建议在反代上再加一道认证，并用 `--trusted-host` 声明浏览器使用的 host。
+  原生 HTTPS 用 `--tls-cert`/`--tls-key`；反代配置见 [docs/reverse-proxy.md](docs/reverse-proxy.md)。
 - **密钥与凭据**：`.env` 写入后权限为 `600`；备份文件同样为 `600`；脚本不会向任何第三方上报数据。
 - **插件即代码**：安装插件等于引入可执行代码（`--plugin-add` 会显式警告），请确认来源可信。
 - **危险操作防护**：删除路径有系统级防护（拒绝 `/`、`$HOME`、顶层目录），卸载/恢复/归档均需确认。
@@ -178,7 +181,10 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 - 插件与 dsh 版本不兼容（0.2.0+）→ `dshctl --plugin-exemptions` / `--plugin-allow`
 - Web 启动报「不允许通配地址」（0.2.1+）→ 重跑 `dshctl --install`（`--web-lan` 自动绑定本机网卡 IP）或 `--host <IP>`
 - 局域网/远程访问 `/api` 返回 403 → 用 `--trusted-host <域名>` 声明浏览器使用的 host
-- 想要对外 HTTPS / 反向代理 → `dshctl --install --public-url https://…/ --tls-cert … --tls-key …`
+- 想要对外 HTTPS / 反向代理 → `dshctl --install --public-url https://…/ --tls-cert … --tls-key …`；
+  配置要求与 nginx 模板见 [docs/reverse-proxy.md](docs/reverse-proxy.md)
+- 反代访问报「dsh web authentication required」→ 首次访问必须带 token（`dshctl --url`），
+  带上后仍失败多为反代改写了 `Host` → [docs/reverse-proxy.md](docs/reverse-proxy.md)
 - 端口被占用（WSL 镜像网络下可能是主机/其他发行版）→ `dshctl --doctor` 或 `--port`（`--port 0` 交给系统分配）
 
 ## 开发与贡献
