@@ -25,6 +25,15 @@
 
 ### 修复
 
+- **systemd 模式下 `--url` / `--status` / `--doctor` 读不到服务日志**：`--logs` 早已按
+  `service_mode()` 在 journald 与日志文件之间分流，但 `--url` 取访问地址、`--status` 探测
+  端口、`--doctor` 的插件诊断仍各自硬编码读 `web.log`。systemd 服务的输出只进 journald
+  （单元文件写死 `StandardOutput=journal`），于是 `--url` 因文件不存在直接失败，或更隐蔽地
+  吐出上一次后台进程模式遗留的**已失效 token**；`--status` 丢失端口（报「由系统分配」）；
+  `--doctor` 静默漏报插件加载错误。现新增 `service_log_text()` 与 `service_log_source()`
+  作为「服务日志来源」的唯一所有者，三处统一经其取日志；抽出 `parse_logged_port()`
+  供 `--status` 与 `detect_logged_port()` 共用；并新增 `service_log_active()`，
+  在服务实际未运行时明确提示地址取自历史日志、可能已失效。
 - **README 安全说明的事实错误**：原称 Web UI「无登录鉴权」，实际 dsh 有启动 token 认证门
   （首次访问须用带 `?token=` 的完整地址）。现改为「有 token 认证门，但监听端口本身不受保护」，
   并明确经反代暴露时建议在反代再加一道认证。中英文同步。

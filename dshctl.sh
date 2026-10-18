@@ -1158,15 +1158,20 @@ resolve_effective_port() {
   return 0
 }
 
+# 从 stdin 的日志文本中解析最后一次出现的监听端口
+parse_logged_port() {
+  grep -Eo 'https?://[^[:space:]/]+:[0-9]{1,5}' \
+    | sed -E 's#.*:([0-9]{1,5})$#\1#' | tail -n1 || true
+}
+
 # 从 Web 启动日志中读取实际监听端口（--port 0 时由系统分配）
 # $2 可选：跳过前面的行数（避免读到上一次运行留下的历史 URL）
+# --start 流程必须用本函数：启动瞬间端口只出现在刚落盘的文件日志里，此时还没有可读的服务日志来源。
 detect_logged_port() {
   local f="$1" skip="${2:-0}"
   [ -f "$f" ] || return 0
   case "$skip" in ''|*[!0-9]*) skip=0 ;; esac
-  tail -n "+$((skip + 1))" -- "$f" 2>/dev/null \
-    | grep -Eo 'https?://[^[:space:]/]+:[0-9]{1,5}' \
-    | sed -E 's#.*:([0-9]{1,5})$#\1#' | tail -n1 || true
+  tail -n "+$((skip + 1))" -- "$f" 2>/dev/null | parse_logged_port
 }
 
 # URL 连通性探测：200/3xx/401/403 等有响应即视为可达
@@ -2428,6 +2433,33 @@ service_log_file() {
   fi
 }
 
+# 一次性读取服务日志时最多回溯的行数：
+# 访问地址在每次启动末尾打印，无需全量日志；journal 也可能非常大。
+SERVICE_LOG_TAIL_LINES=1000
+
+# 读取服务日志尾部文本（一次性，非跟踪）：systemd 模式读 journald，其余读日志文件。
+# 本函数是「服务日志来源」的唯一所有者，--url / --status / --doctor 都经由它取日志。
+# --logs 因需要流式跟踪（exec journalctl -f / tail -f）而自行分支，但共用 service_mode() 判定。
+service_log_text() {
+  local lfile=""
+  if [ "$(service_mode)" = "systemd" ]; then
+    journalctl --user -u dsh -n "$SERVICE_LOG_TAIL_LINES" --no-pager 2>/dev/null || true
+  else
+    lfile="$(service_log_file)"
+    if [ -f "$lfile" ]; then tail -n "$SERVICE_LOG_TAIL_LINES" -- "$lfile"; fi
+  fi
+  return 0
+}
+
+# 服务日志来源的可读描述（用于提示与报错，便于用户直接去对应位置排查）
+service_log_source() {
+  if [ "$(service_mode)" = "systemd" ]; then
+    printf 'journalctl --user -u dsh'
+  else
+    printf '%s' "$(service_log_file)"
+  fi
+}
+
 service_mode() {
   if [ "$(service_profile)" = "web" ] && command -v systemctl >/dev/null 2>&1 && [ -f "$HOME/.config/systemd/user/dsh.service" ]; then
     printf 'systemd'
@@ -2447,6 +2479,17 @@ web_running_pid() {
   local pid=""
   pid="$(cat "$(service_pid_file)" 2>/dev/null || true)"
   if pid_alive "$pid"; then printf '%s' "$pid"; fi
+}
+
+# 服务当前是否真的在运行。
+# 注意 service_mode() 反映的是「采用了哪种托管方式」（只看单元文件 / PID 文件是否存在），
+# 并不等于运行态：单元文件可能残留而服务早已停止。判断日志中的地址是否新鲜必须用本函数。
+service_log_active() {
+  case "$(service_mode)" in
+    systemd) systemctl --user is-active --quiet dsh.service 2>/dev/null ;;
+    pid)     [ -n "$(web_running_pid)" ] ;;
+    *)       return 1 ;;
+  esac
 }
 
 # 读取启动器中形如 VAR="value" 的烘焙值（去除两侧引号）
@@ -2513,7 +2556,7 @@ do_status() {
 
   local eff_port="$DSH_PORT"
   if [ "$eff_port" -eq 0 ]; then
-    eff_port="$(detect_logged_port "$WEB_LOG_FILE")"
+    eff_port="$(service_log_text | parse_logged_port)"
     [ -n "$eff_port" ] || eff_port="0"
   fi
   if [ "$eff_port" != "0" ] && port_listening "$eff_port"; then
@@ -2729,15 +2772,14 @@ do_doctor() {
     fi
     [ -n "$lpub" ] && printf '  对外地址   : %s\n' "$lpub"
   fi
-  if [ -f "$WEB_LOG_FILE" ]; then
-    local plerr=""
-    plerr="$(grep -nE "plugin tree failed|failed to (load|apply) loader entry" "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
-    if [ -n "$plerr" ]; then
+  # 插件加载/兼容诊断：日志来源随服务模式而定（systemd -> journald）
+  local plog=""
+  plog="$(service_log_text)"
+  if [ -n "$plog" ]; then
+    if printf '%s\n' "$plog" | grep -qE "plugin tree failed|failed to (load|apply) loader entry"; then
       printf '  插件加载   : ⚠ 检测到加载错误（dshctl --logs --last 100 查看）\n'
     fi
-    local pcompat=""
-    pcompat="$(grep -nE "is incompatible with dsh|profile startup denies it" "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
-    if [ -n "$pcompat" ]; then
+    if printf '%s\n' "$plog" | grep -qE "is incompatible with dsh|profile startup denies it"; then
       printf '  插件兼容   : ⚠ 检测到不兼容插件（--plugin-exemptions 查看豁免；--plugin-allow 授予）\n'
     fi
   fi
@@ -4769,14 +4811,21 @@ do_rollback_prepare() {
 # -----------------------------------------------------------------------------
 do_url() {
   step "Web UI 访问地址"
-  [ -f "$WEB_LOG_FILE" ] || die "未找到服务日志（${WEB_LOG_FILE}）；请先 dshctl --start。"
-  local url=""
-  # 日志为追加写入，取最后一次启动打印的带 token 地址
-  url="$(grep -Eo 'https?://[^ ]*\?token=[A-Za-z0-9._-]+' "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
-  if [ -z "$url" ]; then
-    url="$(grep -Eo 'https?://[0-9A-Za-z.:_-]+[^ ]*' "$WEB_LOG_FILE" 2>/dev/null | tail -n1 || true)"
+  local lsrc lfile url=""
+  lsrc="$(service_log_source)"
+  # 日志来源随服务模式而定（systemd -> journald），不能再假定 web.log 存在；
+  # 仅当来源是日志文件时才要求文件存在，以保留「未启动则提示先 --start」的语义。
+  if [ "$(service_mode)" != "systemd" ]; then
+    lfile="$(service_log_file)"
+    [ -f "$lfile" ] || die "未找到服务日志（${lfile}）；请先 dshctl --start。"
   fi
-  [ -n "$url" ] || die "日志中未找到访问地址（可 dshctl --logs 查看）。"
+  # 日志为追加写入，取最后一次启动打印的带 token 地址
+  url="$(service_log_text | grep -Eo 'https?://[^ ]*\?token=[A-Za-z0-9._-]+' | tail -n1 || true)"
+  if [ -z "$url" ]; then
+    url="$(service_log_text | grep -Eo 'https?://[0-9A-Za-z.:_-]+[^ ]*' | tail -n1 || true)"
+  fi
+  [ -n "$url" ] || die "服务日志中未找到访问地址（来源: ${lsrc}；可 dshctl --logs 查看）。"
+  service_log_active || warn "服务当前未在运行，以下地址取自历史日志，可能已失效（如需刷新请 dshctl --start）。"
   printf '  访问地址   : %s\n' "$url"
 
   local lmode="" lpub="" lhost=""
