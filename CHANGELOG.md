@@ -5,7 +5,7 @@
 
 > 说明：1.4.0 是本项目首个以开源仓库形式发布的版本，更早的内部迭代历史不再追溯。
 
-## [Unreleased]
+## [1.5.2] - 2026-10-18
 
 ### 新增
 
@@ -182,7 +182,9 @@
 - 增加 ShellCheck 静态检查、CLI 测试套件与 GitHub Actions CI；发布工作流在打 tag 时
   自动校验版本一致性并创建 Release。
 
-[Unreleased]: https://github.com/ThzxxArt/dshctl/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/ThzxxArt/dshctl/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.5.2
+[1.5.1]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.5.1
 [1.5.0]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.5.0
 [1.4.2]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.2
 [1.4.1]: https://github.com/ThzxxArt/dshctl/releases/tag/v1.4.1
