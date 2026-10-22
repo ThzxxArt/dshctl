@@ -38,10 +38,16 @@
    `浏览器 → 宿主机 nginx → frps → frpc → dsh`。nginx 设好 `proxy_set_header Host $host`
    之后，**隧道段不得再改写 Host**，否则第 1 条的效果被后一层抵消，前功尽弃。
    自查方法：确认 dsh 收到的 Host 就是浏览器地址栏里的域名。
+8. **长连接由 dsh 自己按心跳切断，反代拦不住，只能减少触发。** Gateway 每 2 秒向
+   WebSocket 发一次 Ping，连续 2 个周期（约 **4 秒**）收不到任何活动就主动 `terminate()`。
+   这是**服务端**行为：`proxy_read_timeout` 配多长都不改变它，反代多出的一跳只会让
+   Ping/Pong 更容易迟到。所以两项都要做：
+   - 反代侧把 WebSocket 与 SSE **单独分流**，并开启上游 TCP 保活（第 3 节模板）；
+   - 公网或高抖动链路调大 dsh 侧 `websocketHeartbeatIntervalMs`（第 9 节）。
 
 ## 3. nginx 模板
 
-以下为完整可用配置，含 basic auth 放行、WebSocket 升级与后端故障页处理。
+以下为完整可用配置，含 basic auth 放行、WebSocket / SSE 分流、上游保活与后端故障页处理。
 
 先在 `http` 块内准备 WebSocket 升级映射：
 
@@ -75,6 +81,9 @@ proxy_set_header X-Forwarded-Port  $server_port;
 proxy_connect_timeout 60s;
 proxy_send_timeout    3600s;
 proxy_read_timeout    3600s;
+
+# 上游 TCP 保活（nginx >= 1.15.6）：空闲长连接不被中间设备悄悄回收
+proxy_socket_keepalive on;
 
 # 流式响应不被缓冲
 proxy_buffering off;
@@ -118,16 +127,29 @@ server {
         include snippets/dsh-proxy.conf;
     }
 
+    # ② WebSocket 主连接：会话消息、工具输出、流式响应的唯一通道。
+    #    单独列出，避免将来给普通 location 加规则时误伤长连接。
+    location = /api/remote.mux {
+        include snippets/dsh-proxy.conf;
+    }
+
+    # ③ SSE 事件流：client plugin 推流端点。
+    #    gzip 会缓冲 SSE 帧，导致事件延迟甚至攒到最后一起发出，必须关掉。
+    location = /plugins/events {
+        gzip off;
+        include snippets/dsh-proxy.conf;
+    }
+
     location / {
         include snippets/dsh-proxy.conf;
     }
 
-    # ② 扫描器与敏感路径：直接断开连接，不返回任何内容
+    # ④ 扫描器与敏感路径：直接断开连接，不返回任何内容
     location ~* (\.env|\.git|\.DS_Store|/console|/server-status|/actuator|/trace\.axd|/HNAP1) {
         return 444;
     }
 
-    # ③ 后端故障时的友好页：少了 auth_basic off，用户看到的是登录框而不是这里
+    # ⑤ 后端故障时的友好页：少了 auth_basic off，用户看到的是登录框而不是这里
     location = /50x.html {
         root /var/www/html;
         internal;
@@ -198,6 +220,10 @@ curl -s -o /dev/null -w '%{http_code}\n' https://dsh.example.com/manifest.webman
 curl -sI https://dsh.example.com/ | grep -iE 'strict-transport|content-security-policy'
 
 # ⑥ 后端故障页（可选）：停掉 dsh 后访问域名，应看到 /50x.html 而不是 basic auth 登录框
+
+# ⑦ 长连接是否稳定：DevTools → 网络 → WS → 选中 /api/remote.mux
+#    - 每 4 秒左右断开一次、关闭码 1006 → 心跳窗口不够，见第 9 节
+#    - 稳定 101 且不主动关闭 → 正常
 ```
 
 浏览器控制台对照：
@@ -274,3 +300,88 @@ map $request_uri $loggable_uri {
 
 # 然后把 log_format 里的 "$request" 换成 "$request_method $loggable_uri $server_protocol"
 ```
+
+## 9. 调大 WebSocket 心跳窗口
+
+dsh 的 Gateway 默认每 **2 秒**发一次 WebSocket Ping；一个 socket 连续 **2 个周期**
+（约 4 秒）没有任何活动（Pong、收到的帧、或完成的下行写入）就会被 `terminate()`。
+浏览器随后按退避策略自动重连 —— 用户看到的是「用一会儿就断、过几秒又连上」。
+
+这**不是反代配置错误**。`proxy_read_timeout` 配成 3600s 也不会改变它，因为判定发生在
+dsh 进程内；反代（尤其是跨境链路）只是让 Ping/Pong 更容易迟到。
+
+### 9.1 用 dshctl 调整（推荐）
+
+```bash
+dshctl --gateway-heartbeat          # 查看当前值与容忍窗口（只读）
+dshctl --gateway-heartbeat-set 30000 -y
+dshctl --restart                    # 该参数在启动时读取，重启生效
+dshctl --gateway-heartbeat          # 复核
+```
+
+想看当前值又不想重启：
+
+```bash
+dshctl --gateway-heartbeat
+```
+
+输出会同时给出「容忍停顿」，即 `2 × 心跳间隔`，省去自己换算：
+
+```
+  心跳间隔     : 30000 ms（30 秒）[已显式设置]
+  容忍停顿     : 60000 ms（60 秒）= 2 × 心跳间隔
+```
+
+改回 dsh 默认（2000 ms / 4 秒窗口）：
+
+```bash
+dshctl --gateway-heartbeat-reset -y && dshctl --restart
+```
+
+命令写入的是 `~/.dsh/profiles/<profile>/cordis.patch.yml` 里 `typert-gateway`
+的 `config.websocketHeartbeatIntervalMs`，**只增删这一行**：同一 `config` 下的
+其他键（例如 `streamInboxBytes`）与文件其余内容原样保留，改动前自动备份
+（`cordis.patch.yml.bak.<时间戳>`，保留最近 3 份）。
+
+<details>
+<summary>手工编辑方式（不用命令时）</summary>
+
+编辑 `~/.dsh/profiles/<profile>/cordis.patch.yml`（默认 profile 是 `web`）：
+
+```yaml
+- id: typert-gateway
+  name: "@deepseek-ai/dsh-api-gateway"
+  config:
+    websocketHeartbeatIntervalMs: 30000
+```
+
+⚠️ 这是 **config override**（dsh 在 profile 文件头部就是这么描述该层语义的）。
+当前 bundle 里 `typert-gateway` 没有其他 config 项，所以只写这一条是安全的；
+若你已在该条目里配了别的键，要一并保留，否则会被这条覆盖掉。用
+`--gateway-heartbeat-set` 则无需操心这点。
+
+</details>
+
+### 9.2 取值参考
+
+| 值（毫秒） | 容忍的无活动时长 | 适用场景 |
+|---|---|---|
+| **2000**（默认） | 约 4 秒 | 本机 / 低延迟内网 |
+| 15000 | 约 30 秒 | 普通公网直连 |
+| **30000** | 约 60 秒 | **反代 + 跨境链路推荐起点** |
+| 60000 | 约 2 分钟 | 高抖动链路（移动网络、卫星） |
+
+- 取值必须是**整数毫秒**，范围 1 ~ 2147483647；
+- 不建议超过 120000：连接真的失效后要过更久才被发现，期间用户操作会静默丢失；
+- 调大同时会降低 Ping 频率，空闲长连接的保活流量变少 —— 所以**不要指望它替代**
+  `proxy_socket_keepalive`，两者解决的是不同环节。
+
+### 9.3 各类断连现象的责任分工
+
+| 现象 | 责任方 | 调哪里 |
+|---|---|---|
+| 约 4 秒断开一次，关闭码 **1006** | dsh Gateway | `websocketHeartbeatIntervalMs`（本节） |
+| 空闲一段时间后被中间设备回收 | 反代 / NAT | `proxy_socket_keepalive` + 心跳周期 |
+| 页面能开但消息不推送 | 反代 | `Upgrade` / `Connection` 头（第 2 节第 2 条） |
+| `/api` 返回 403 | dsh Host 栅栏 | `--trusted-host` |
+| 首次访问要求 token | dsh 认证门 | `dshctl --url` |

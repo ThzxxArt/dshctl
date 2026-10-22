@@ -112,6 +112,7 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | 插件策略 | `--plugin-repair` `--plugin-policy` `--plugin-policy-set N` `--plugin-policy-reset` | pnpm `minimumReleaseAge` 拦截排障 |
 | 插件豁免 | `--plugin-exemptions` / `--plugin-allow SPEC` / `--plugin-revoke SPEC` | dsh 0.2.0+ 插件兼容性门禁的豁免管理 |
 | 模型 | `--model-show` `--model-check` `--model-fix` `--model-set-base URL` | Base URL 规范检查与修复（0.1.7+ 配置在 profile） |
+| 网关 | `--gateway-heartbeat` / `-set MS` / `-reset` | WebSocket 心跳间隔（默认 4 秒窗口，公网易断连） |
 | 数据 | `--data-backup` `--data-restore FILE` `--data-archive-sessions` `--data-prune` | 备份 / 恢复 / 旧会话归档 / 缓存清理 |
 | 版本 | `--rollback [REF]` `--upgrade-check` | 回退与升级检查 |
 | 访问 | `--url` `--web-lan` `--host IP` `--public-url URL` `--tls-cert FILE` `--tls-key FILE` `--trusted-host HOST` | 打印带 token 的地址；局域网/对外访问与原生 HTTPS |
@@ -185,6 +186,9 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
   配置要求与 nginx 模板见 [docs/reverse-proxy.md](docs/reverse-proxy.md)
 - 反代访问报「dsh web authentication required」→ 首次访问必须带 token（`dshctl --url`），
   带上后仍失败多为反代改写了 `Host` → [docs/reverse-proxy.md](docs/reverse-proxy.md)
+- 通过域名访问时连接用一会儿就断、随后自动重连 → dsh 的 WebSocket 心跳窗口默认约 4 秒，
+  公网链路偏短；`dshctl --gateway-heartbeat-set 30000 -y` 后 `--restart` 即可 →
+  [docs/reverse-proxy.md 第 9 节](docs/reverse-proxy.md#9-调大-websocket-心跳窗口)
 - 端口被占用（WSL 镜像网络下可能是主机/其他发行版）→ `dshctl --doctor` 或 `--port`（`--port 0` 交给系统分配）
 
 ## 开发与贡献

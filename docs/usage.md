@@ -120,6 +120,17 @@ token 会换成会话 cookie，之后可用裸域名）；反代还需保留浏�
 升级头，并且不要在反代上加 CSP 响应头。完整要求、nginx 模板与验证清单见
 [reverse-proxy.md](reverse-proxy.md)。
 
+若通过域名访问时**连接用一会儿就断、随后自动重连**，通常不是反代故障，而是 dsh 的
+WebSocket 心跳窗口（默认约 4 秒）在公网链路上偏短：
+
+```bash
+dshctl --gateway-heartbeat           # 查看当前值与容忍窗口
+dshctl --gateway-heartbeat-set 30000 -y
+dshctl --restart                     # 启动时读取，重启生效
+```
+
+详见 [reverse-proxy.md 第 9 节](reverse-proxy.md#9-调大-websocket-心跳窗口)。
+
 ## 4. 插件管理
 
 插件按 profile 管理（默认 `web`），变更后需重启服务生效（交互询问，`-y` 自动重启）：

@@ -116,9 +116,11 @@ PLUGIN_PROFILE="web"
 PLUGIN_SPECS=()
 MODEL_ACTION=""
 MODEL_BASE_URL=""
+GATEWAY_HEARTBEAT_ACTION=""
+GATEWAY_HEARTBEAT_MS=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.5.2"
+DSHCTL_VERSION="1.6.0"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -491,6 +493,19 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       说明：dsh 0.1.6 起默认 Messages 协议（官方端点 https://api.deepseek.com/anthropic）；
             Base URL 只允许来自 profile/settings 配置或启动环境变量，写进 .env 会被拒绝启动。
 
+网关调优（长连接稳定性；写入 profile 的 cordis.patch.yml）:
+      --gateway-heartbeat   查看 WebSocket 心跳间隔与容忍窗口（只读）
+      --gateway-heartbeat-set MS
+                            设置心跳间隔（整数毫秒，1..2147483647，默认 2000）。
+                            dsh 对连续 2 个周期无响应的连接直接终止，容忍窗口
+                            = 2 × 间隔（默认仅 4 秒）。跨公网 / 反向代理建议
+                            30000；改完需重启服务（--restart）
+      --gateway-heartbeat-reset
+                            移除该设置，回落 dsh 默认 2000 ms
+      说明：域名访问「一会儿就断开又自动重连」多为该窗口被网络停顿击穿，服务端主动
+            terminate，浏览器按退避重连。反向代理只能减少触发，根治需调大此参数。
+            详见 docs/reverse-proxy.md「调大 WebSocket 心跳窗口」。
+
 数据维护（运行数据位于 ~/.dsh，升级前后建议先 --data-backup）:
       --data-backup         备份 ~/.dsh 到 ~/dshctl-backup-<时间戳>.tar.gz
       --data-restore FILE   从备份恢复（自动备份现状并先停止服务）
@@ -730,6 +745,7 @@ validate_args() {
   local svc_count=0 opt
   local -a plugin_acts=()
   local -a model_acts=()
+  local -a gateway_acts=()
   local -a data_acts=()
   local -a backup_acts=()
   for opt in ${SEEN_OPTS[@]+"${SEEN_OPTS[@]}"}; do
@@ -751,6 +767,9 @@ validate_args() {
       --model-check) model_acts+=("check") ;;
       --model-fix)   model_acts+=("fix") ;;
       --model-set-base) model_acts+=("set-base") ;;
+      --gateway-heartbeat) gateway_acts+=("show") ;;
+      --gateway-heartbeat-set) gateway_acts+=("set") ;;
+      --gateway-heartbeat-reset) gateway_acts+=("reset") ;;
       --data-backup)   data_acts+=("backup") ;;
       --data-restore)  data_acts+=("restore") ;;
       --data-archive-sessions) data_acts+=("archive-sessions") ;;
@@ -773,6 +792,13 @@ validate_args() {
       [ "$ma" = "$model_first" ] || model_conflict=1
     done
     [ "$model_conflict" -eq 1 ] && die "操作冲突：模型维护命令只能选择一个（--model-show / --model-check / --model-fix / --model-set-base）"
+  fi
+  if [ "${#gateway_acts[@]}" -gt 0 ]; then
+    local ga gateway_first="${gateway_acts[0]}" gateway_conflict=0
+    for ga in ${gateway_acts[@]+"${gateway_acts[@]}"}; do
+      [ "$ga" = "$gateway_first" ] || gateway_conflict=1
+    done
+    [ "$gateway_conflict" -eq 1 ] && die "操作冲突：网关调优命令只能选择一个（--gateway-heartbeat / -set / -reset）"
   fi
   if [ "${#data_acts[@]}" -gt 0 ]; then
     local da data_first="${data_acts[0]}" data_conflict=0
@@ -797,6 +823,7 @@ validate_args() {
   [ "$DO_UNREGISTER" -eq 1 ] && modes+=("unregister")
   [ "${#plugin_acts[@]}" -gt 0 ] && modes+=("plugins")
   [ "${#model_acts[@]}" -gt 0 ] && modes+=("model")
+  [ "${#gateway_acts[@]}" -gt 0 ] && modes+=("gateway")
   [ "${#data_acts[@]}" -gt 0 ] && modes+=("data")
   [ "${#backup_acts[@]}" -gt 0 ] && modes+=("backups")
   [ "$DO_URL" -eq 1 ] && modes+=("url")
@@ -816,6 +843,7 @@ validate_args() {
       --install|--status|--doctor|--start|--stop|--restart|--logs|--uninstall|--purge|--register|--unregister) ;;
       --plugin-list|--plugin-add|--plugin-remove|--plugin-update|--plugin-why|--plugin-repair|--plugin-policy|--plugin-policy-set|--plugin-policy-reset|--plugin-exemptions|--plugin-allow|--plugin-revoke) ;;
       --model-show|--model-check|--model-fix|--model-set-base) ;;
+      --gateway-heartbeat|--gateway-heartbeat-set|--gateway-heartbeat-reset) ;;
       --data-backup|--data-restore|--data-archive-sessions|--data-prune) ;;
       --backups-list|--backups-prune) ;;
       --url|--upgrade-check) ;;
@@ -880,6 +908,14 @@ validate_args() {
     case "$BACKUP_KEEP" in
       ''|*[!0-9]*) die "--backups-prune 的保留数量必须是非负整数: $BACKUP_KEEP" ;;
     esac
+  fi
+  if [ "$GATEWAY_HEARTBEAT_ACTION" = "set" ]; then
+    case "$GATEWAY_HEARTBEAT_MS" in
+      ''|*[!0-9]*) die "--gateway-heartbeat-set 需要正整数毫秒数: ${GATEWAY_HEARTBEAT_MS:-空}" ;;
+    esac
+    if [ "$GATEWAY_HEARTBEAT_MS" -lt 1 ] || [ "$GATEWAY_HEARTBEAT_MS" -gt 2147483647 ]; then
+      die "--gateway-heartbeat-set 取值范围为 1..2147483647（收到: ${GATEWAY_HEARTBEAT_MS}）"
+    fi
   fi
   if [ "${#TRUSTED_HOSTS[@]}" -gt 0 ]; then
     local th
@@ -1017,6 +1053,10 @@ while [ "$#" -gt 0 ]; do
     --model-check)       MODEL_ACTION="check" ;;
     --model-fix)         MODEL_ACTION="fix" ;;
     --model-set-base)    need_val "$@"; MODEL_ACTION="set-base"; MODEL_BASE_URL="$2"; shift ;;
+    --gateway-heartbeat) GATEWAY_HEARTBEAT_ACTION="show" ;;
+    --gateway-heartbeat-set)
+                         need_val "$@"; GATEWAY_HEARTBEAT_ACTION="set"; GATEWAY_HEARTBEAT_MS="$2"; shift ;;
+    --gateway-heartbeat-reset) GATEWAY_HEARTBEAT_ACTION="reset" ;;
     --data-backup)       DATA_ACTION="backup" ;;
     --data-restore)      need_val "$@"; DATA_ACTION="restore"; DATA_ARCHIVE="$2"; shift ;;
     --data-archive-sessions) DATA_ACTION="archive-sessions" ;;
@@ -3943,6 +3983,403 @@ patch_delete_llm_key() {
   mv -f -- "$tmp" "$f"
 }
 
+# -----------------------------------------------------------------------------
+# 通用 patch 配置读写（按条目 id 定位，只动 config 的直接子键）
+#   上面的 patch_*_llm_* 是 llm-deepseek 专用的历史实现；新增能力请用这组：
+#   它们把条目 id 参数化，并且只匹配 config 的直接子级——嵌套层里的同名键
+#   （例如某个数组元素内的同名字段）不会被误读或误改。
+# -----------------------------------------------------------------------------
+
+# 读取 <file> 中 id 为 <id> 的条目 config.<key>
+patch_read_key() {
+  local f="$1" want_id="$2" key="$3" sq="'"
+  [ -f "$f" ] || return 0
+  awk -v wid="$want_id" -v key="$key" -v sq="$sq" '
+    function indent(s,  i, c) {
+      i = 0
+      while (i < length(s)) { c = substr(s, i + 1, 1); if (c == " " || c == "\t") i++; else break }
+      return i
+    }
+    function unquote(v) {
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (length(v) >= 2) {
+        c1 = substr(v, 1, 1); c2 = substr(v, length(v), 1)
+        if (c1 == "\"" && c2 == "\"") return substr(v, 2, length(v) - 2)
+        if (c1 == sq && c2 == sq) return substr(v, 2, length(v) - 2)
+      }
+      sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      return v
+    }
+    BEGIN { item = 0; cfg = 0; child = -1 }
+    {
+      line = $0
+      if (line ~ /^[ \t]*#/ || line ~ /^[ \t]*$/) next
+      ind = indent(line)
+      if (ind == 0 && substr(line, 1, 1) == "-") {
+        item = 0; cfg = 0; child = -1
+        rest = line; sub(/^-[ \t]*/, "", rest)
+        if (rest ~ /^id:[ \t]*/) { sub(/^id:[ \t]*/, "", rest); if (unquote(rest) == wid) item = 1 }
+        next
+      }
+      if (cfg && ind <= cfgind) { cfg = 0; child = -1 }
+      if (ind <= 2 && line ~ /^[ \t]*id:[ \t]*/) {
+        v = line; sub(/^[ \t]*id:[ \t]*/, "", v)
+        if (unquote(v) == wid) item = 1
+        next
+      }
+      if (item && line ~ /^[ \t]*config:[ \t]*$/) { cfg = 1; cfgind = ind; child = -1; next }
+      if (cfg && ind > cfgind) {
+        if (child < 0) child = ind
+        if (ind == child) {
+          k = line; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k)
+          if (k == key) {
+            v = line; sub(/^[ \t]*[A-Za-z_][A-Za-z0-9_-]*:[ \t]*/, "", v)
+            print unquote(v)
+            exit
+          }
+        }
+      }
+    }
+  ' "$f" 2>/dev/null || true
+  return 0
+}
+
+# 设置 <file> 中 id 为 <id> 的条目 config.<key>=<value>（缺条目/缺键时按需创建）
+patch_set_key() {
+  local f="$1" want_id="$2" key="$3" value="$4" sq="'" tmp
+  mkdir -p "$(dirname -- "$f")" 2>/dev/null || return 1
+  if [ ! -f "$f" ]; then printf '[]\n' > "$f" || return 1; fi
+  tmp="$f.dshctl.tmp"
+  if ! awk -v wid="$want_id" -v key="$key" -v val="$value" -v sq="$sq" '
+    function indent(s,  i, c) {
+      i = 0
+      while (i < length(s)) { c = substr(s, i + 1, 1); if (c == " " || c == "\t") i++; else break }
+      return i
+    }
+    function unquote(v) {
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (length(v) >= 2) {
+        c1 = substr(v, 1, 1); c2 = substr(v, length(v), 1)
+        if (c1 == "\"" && c2 == "\"") return substr(v, 2, length(v) - 2)
+        if (c1 == sq && c2 == sq) return substr(v, 2, length(v) - 2)
+      }
+      sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      return v
+    }
+    function pad(n,  s) {
+      s = ""
+      while (length(s) < n) s = s " "
+      return s
+    }
+    { lines[++n] = $0 }
+    END {
+      m = 0
+      for (i = 1; i <= n; i++) {
+        if (indent(lines[i]) == 0 && substr(lines[i], 1, 1) == "-") starts[++m] = i
+      }
+      starts[m + 1] = n + 1
+
+      target = 0
+      for (j = 1; j <= m; j++) {
+        a = starts[j]; b = starts[j + 1] - 1
+        id = ""
+        rest = lines[a]; sub(/^-[ \t]*/, "", rest)
+        if (rest ~ /^id:[ \t]*/) { sub(/^id:[ \t]*/, "", rest); id = unquote(rest) }
+        else {
+          for (k = a + 1; k <= b; k++) {
+            if (indent(lines[k]) <= 2 && lines[k] ~ /^[ \t]*id:[ \t]*/) {
+              r2 = lines[k]; sub(/^[ \t]*id:[ \t]*/, "", r2); id = unquote(r2); break
+            }
+          }
+        }
+        if (id == wid) { target = j; break }
+      }
+
+      cfg = 0; cfgind = -1; child = -1; keyline = 0
+      emptyrow = 0; badinline = 0; entry_pad = 2; lastval = 0; bend = 0
+
+      if (target > 0) {
+        a = starts[target]; bend = starts[target + 1] - 1
+        for (i = a + 1; i <= bend; i++) {
+          if (lines[i] ~ /^[ \t]*$/ || lines[i] ~ /^[ \t]*#/) continue
+          entry_pad = indent(lines[i]); break
+        }
+        for (i = a; i <= bend; i++) {
+          if (lines[i] ~ /^[ \t]*config:[ \t]*$/) { cfg = i; cfgind = indent(lines[i]) }
+          else if (lines[i] ~ /^[ \t]*config:[ \t]*\{\}[ \t]*$/) { emptyrow = i; cfgind = indent(lines[i]) }
+          else if (lines[i] ~ /^[ \t]*config:[ \t]*\{/) { badinline = 1 }
+        }
+        if (cfg > 0) {
+          for (i = cfg + 1; i <= bend; i++) {
+            if (lines[i] ~ /^[ \t]*$/ || lines[i] ~ /^[ \t]*#/) continue
+            if (indent(lines[i]) <= cfgind) break
+            lastval = i
+            if (child < 0) child = indent(lines[i])
+          }
+          if (lastval == 0) lastval = cfg
+          for (i = cfg + 1; i <= lastval; i++) {
+            if (lines[i] ~ /^[ \t]*$/ || lines[i] ~ /^[ \t]*#/) continue
+            if (indent(lines[i]) != child) continue
+            k = lines[i]; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k)
+            if (k == key) { keyline = i; break }
+          }
+        }
+      }
+
+      if (badinline) {
+        print "dshctl: " wid " 的 config 为内联写法，暂不支持自动修改" > "/dev/stderr"
+        exit 1
+      }
+
+      keypad = (child >= 0) ? child : (cfgind >= 0 ? cfgind + 2 : 4)
+      done = 0
+
+      for (i = 1; i <= n; i++) {
+        if (target == 0 && done == 0 && lines[i] ~ /^[ \t]*\[[ \t]*\][ \t]*$/) continue
+        if (keyline == i) { print pad(keypad) key ": " val; done = 1; continue }
+        print lines[i]
+        if (emptyrow == i) { print pad(keypad) key ": " val; done = 1; continue }
+        if (cfg > 0 && keyline == 0 && lastval == i) {
+          print pad(keypad) key ": " val; done = 1; continue
+        }
+        if (target > 0 && cfg == 0 && emptyrow == 0 && done == 0 && i == bend) {
+          print pad(entry_pad) "config:"
+          print pad(entry_pad + 2) key ": " val
+          done = 1
+        }
+      }
+      if (done == 0) {
+        print "- id: " wid
+        print "  config:"
+        print "    " key ": " val
+      }
+    }
+  ' "$f" > "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  mv -f -- "$tmp" "$f"
+}
+
+# 移除 <file> 中 id 为 <id> 的条目 config.<key>；config 变空时写为 {}
+patch_delete_key() {
+  local f="$1" want_id="$2" key="$3" sq="'" tmp
+  [ -f "$f" ] || return 0
+  tmp="$f.dshctl.tmp"
+  if ! awk -v wid="$want_id" -v key="$key" -v sq="$sq" '
+    function indent(s,  i, c) {
+      i = 0
+      while (i < length(s)) { c = substr(s, i + 1, 1); if (c == " " || c == "\t") i++; else break }
+      return i
+    }
+    function unquote(v) {
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (length(v) >= 2) {
+        c1 = substr(v, 1, 1); c2 = substr(v, length(v), 1)
+        if (c1 == "\"" && c2 == "\"") return substr(v, 2, length(v) - 2)
+        if (c1 == sq && c2 == sq) return substr(v, 2, length(v) - 2)
+      }
+      sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      return v
+    }
+    function pad(n,  s) {
+      s = ""
+      while (length(s) < n) s = s " "
+      return s
+    }
+    { lines[++n] = $0 }
+    END {
+      m = 0
+      for (i = 1; i <= n; i++) {
+        if (indent(lines[i]) == 0 && substr(lines[i], 1, 1) == "-") starts[++m] = i
+      }
+      starts[m + 1] = n + 1
+
+      target = 0
+      for (j = 1; j <= m; j++) {
+        a = starts[j]; b = starts[j + 1] - 1
+        id = ""
+        rest = lines[a]; sub(/^-[ \t]*/, "", rest)
+        if (rest ~ /^id:[ \t]*/) { sub(/^id:[ \t]*/, "", rest); id = unquote(rest) }
+        if (id == wid) { target = j; break }
+      }
+
+      cfg = 0; cfgind = -1; child = -1; keyline = 0; bend = 0
+      if (target > 0) {
+        a = starts[target]; bend = starts[target + 1] - 1
+        for (i = a; i <= bend; i++) {
+          if (lines[i] ~ /^[ \t]*config:[ \t]*$/) { cfg = i; cfgind = indent(lines[i]) }
+        }
+        if (cfg > 0) {
+          for (i = cfg + 1; i <= bend; i++) {
+            if (lines[i] ~ /^[ \t]*$/ || lines[i] ~ /^[ \t]*#/) continue
+            if (indent(lines[i]) <= cfgind) break
+            if (child < 0) child = indent(lines[i])
+            if (indent(lines[i]) != child) continue
+            k = lines[i]; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k)
+            if (k == key) { keyline = i; break }
+          }
+        }
+      }
+
+      if (target == 0 || cfg == 0 || keyline == 0) {
+        for (i = 1; i <= n; i++) print lines[i]
+        exit
+      }
+
+      remaining = 0
+      for (i = cfg + 1; i <= bend; i++) {
+        if (i == keyline) continue
+        if (lines[i] ~ /^[ \t]*$/ || lines[i] ~ /^[ \t]*#/) continue
+        if (indent(lines[i]) <= cfgind) break
+        remaining++
+      }
+
+      for (i = 1; i <= n; i++) {
+        if (i == keyline) continue
+        if (i == cfg && remaining == 0) { print pad(cfgind) "config: {}"; continue }
+        print lines[i]
+      }
+    }
+  ' "$f" > "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  mv -f -- "$tmp" "$f"
+}
+
+# -----------------------------------------------------------------------------
+# 网关心跳调优：typert-gateway.config.websocketHeartbeatIntervalMs
+#   dsh 每隔 N 毫秒向连接发一次 Ping，连续两个周期收不到 Pong 即 terminate；
+#   因此容忍窗口 = 2N（默认 N=2000，窗口仅 4 秒）。跨公网 / 反向代理访问时，
+#   任何超过窗口的停顿都会被服务端主动断开，浏览器再按退避重连——这就是
+#   「域名访问一会儿就断开又自动重连」的根因。调大 N 可显著减少误断。
+# -----------------------------------------------------------------------------
+GATEWAY_PATCH_ID="typert-gateway"
+GATEWAY_PATCH_KEY="websocketHeartbeatIntervalMs"
+GATEWAY_DEFAULT_MS=2000
+GATEWAY_MS_MAX=2147483647
+
+gateway_patch_file() {
+  printf '%s/%s/cordis.patch.yml' "$PROFILES_DIR" "$PLUGIN_PROFILE"
+}
+
+gateway_heartbeat_current() {
+  patch_read_key "$(gateway_patch_file)" "$GATEWAY_PATCH_ID" "$GATEWAY_PATCH_KEY"
+}
+
+# 毫秒转人类可读（整秒时显示「N 秒」）
+gateway_ms_human() {
+  local ms="$1"
+  case "$ms" in
+    ''|*[!0-9]*) printf '%s' "$ms"; return 0 ;;
+  esac
+  if [ "$ms" -ge 1000 ] && [ $((ms % 1000)) -eq 0 ]; then
+    printf '%s 秒' "$((ms / 1000))"
+  else
+    printf '%s ms' "$ms"
+  fi
+}
+
+# 当前值展示文案（未设置时说明使用默认值）
+gateway_value_label() {
+  local v="$1"
+  case "$v" in
+    ''|*[!0-9]*) printf '未显式设置（dsh 默认 %s ms）' "$GATEWAY_DEFAULT_MS" ;;
+    *)           printf '%s ms（%s）' "$v" "$(gateway_ms_human "$v")" ;;
+  esac
+}
+
+# 同一文件的备份只保留最近 3 份
+gateway_prune_backups() {
+  local f="$1" old_bak
+  while IFS= read -r old_bak; do
+    rm -f -- "$old_bak" 2>/dev/null || true
+  done < <(ls -1t "$f".bak.* 2>/dev/null | tail -n +4)
+}
+
+do_gateway_heartbeat() {
+  local f cur win
+  f="$(gateway_patch_file)"
+  printf '  profile      : %s\n' "$PLUGIN_PROFILE"
+  printf '  配置文件     : %s\n' "$f"
+  cur=""
+  if [ -f "$f" ]; then cur="$(gateway_heartbeat_current)"; fi
+  case "$cur" in
+    ''|*[!0-9]*)
+      printf '  心跳间隔     : %s ms（%s）— 未显式设置，使用 dsh 默认值\n' \
+        "$GATEWAY_DEFAULT_MS" "$(gateway_ms_human "$GATEWAY_DEFAULT_MS")"
+      win=$((GATEWAY_DEFAULT_MS * 2))
+      printf '  容忍停顿     : %s ms（%s）= 2 × 心跳间隔\n' "$win" "$(gateway_ms_human "$win")"
+      ;;
+    *)
+      printf '  心跳间隔     : %s ms（%s）[已显式设置]\n' "$cur" "$(gateway_ms_human "$cur")"
+      win=$((cur * 2))
+      printf '  容忍停顿     : %s ms（%s）= 2 × 心跳间隔\n' "$win" "$(gateway_ms_human "$win")"
+      ;;
+  esac
+  printf '  取值范围     : 1..%s（整数毫秒）\n' "$GATEWAY_MS_MAX"
+  info "设置: dshctl --gateway-heartbeat-set MS    移除: dshctl --gateway-heartbeat-reset"
+  return 0
+}
+
+do_gateway_heartbeat_set() {
+  local ms="$GATEWAY_HEARTBEAT_MS" f cur win ts
+  f="$(gateway_patch_file)"
+  cur=""
+  if [ -f "$f" ]; then cur="$(gateway_heartbeat_current)"; fi
+  printf '  当前值     : %s\n' "$(gateway_value_label "$cur")"
+  printf '  目标值     : %s ms（%s）\n' "$ms" "$(gateway_ms_human "$ms")"
+  win=$((ms * 2))
+  printf '  容忍停顿   : %s ms（%s）= 2 × 心跳间隔\n' "$win" "$(gateway_ms_human "$win")"
+  printf '  写入位置   : %s\n' "$f"
+  printf '  条目键     : %s.config.%s\n' "$GATEWAY_PATCH_ID" "$GATEWAY_PATCH_KEY"
+  if ! confirm_config_change "确认写入 profile「${PLUGIN_PROFILE}」的网关心跳设置？"; then
+    die "已取消（未修改配置）。"
+  fi
+  ts="$(date +%Y%m%d-%H%M%S)"
+  if [ -f "$f" ]; then
+    cp -a -- "$f" "$f.bak.$ts" || die "备份失败: $f"
+    info "已备份: $f.bak.$ts"
+  fi
+  patch_set_key "$f" "$GATEWAY_PATCH_ID" "$GATEWAY_PATCH_KEY" "$ms" || die "写入 $f 失败。"
+  ok "已设置 ${GATEWAY_PATCH_KEY}=${ms}（profile: ${PLUGIN_PROFILE}）"
+  gateway_prune_backups "$f"
+  warn "该参数在 dsh 启动时读取，需重启生效：dshctl --restart"
+  return 0
+}
+
+do_gateway_heartbeat_reset() {
+  local f cur ts win
+  f="$(gateway_patch_file)"
+  if [ ! -f "$f" ]; then
+    info "配置文件不存在，无需重置（当前即 dsh 默认 %s ms）。" "$GATEWAY_DEFAULT_MS"
+    return 0
+  fi
+  cur="$(gateway_heartbeat_current)"
+  case "$cur" in
+    ''|*[!0-9]*)
+      info "当前未显式设置 ${GATEWAY_PATCH_KEY}，无需重置。"
+      return 0
+      ;;
+  esac
+  printf '  当前值   : %s ms（%s）\n' "$cur" "$(gateway_ms_human "$cur")"
+  win=$((GATEWAY_DEFAULT_MS * 2))
+  printf '  重置后   : %s ms（%s），容忍窗口 %s ms\n' \
+    "$GATEWAY_DEFAULT_MS" "$(gateway_ms_human "$GATEWAY_DEFAULT_MS")" "$win"
+  if ! confirm_config_change "确认移除 profile「${PLUGIN_PROFILE}」的 $GATEWAY_PATCH_KEY 设置？"; then
+    die "已取消（未修改配置）。"
+  fi
+  ts="$(date +%Y%m%d-%H%M%S)"
+  cp -a -- "$f" "$f.bak.$ts" || die "备份失败: $f"
+  info "已备份: $f.bak.$ts"
+  patch_delete_key "$f" "$GATEWAY_PATCH_ID" "$GATEWAY_PATCH_KEY" || die "写入 $f 失败。"
+  ok "已移除 ${GATEWAY_PATCH_KEY}，回落 dsh 默认 ${GATEWAY_DEFAULT_MS} ms"
+  gateway_prune_backups "$f"
+  warn "重启后生效：dshctl --restart"
+  return 0
+}
+
 # 写入 llm-deepseek.baseURL：0.1.7+ 写 profile 的 cordis.patch.yml，≤0.1.6 写 settings.yaml
 settings_write_baseurl() {
   local url="$1"
@@ -5220,6 +5657,14 @@ main() {
       check)    do_model_check ;;
       fix)      do_model_fix ;;
       set-base) do_model_set_base ;;
+    esac
+    return 0
+  fi
+  if [ -n "$GATEWAY_HEARTBEAT_ACTION" ]; then
+    case "$GATEWAY_HEARTBEAT_ACTION" in
+      show)  do_gateway_heartbeat ;;
+      set)   do_gateway_heartbeat_set ;;
+      reset) do_gateway_heartbeat_reset ;;
     esac
     return 0
   fi

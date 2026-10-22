@@ -5,6 +5,37 @@
 
 > 说明：1.4.0 是本项目首个以开源仓库形式发布的版本，更早的内部迭代历史不再追溯。
 
+## [1.6.0] - 2026-10-22
+
+### 新增
+
+- **网关心跳参数的命令化管理**：新增 `--gateway-heartbeat`（查看）、`--gateway-heartbeat-set MS`
+  （设置）、`--gateway-heartbeat-reset`（移除）三条命令，直接维护 profile 的 `cordis.patch.yml`
+  中 `typert-gateway` 条目的 `websocketHeartbeatIntervalMs`，免去手工编辑 YAML。此前 v1.5.2
+  的接入手册只教「手改配置文件」，跨公网或经反向代理部署的用户得自己动文件才能缓解断连。
+- **幂等的 YAML 定点读写**：新增 `patch_read_key` / `patch_set_key` / `patch_delete_key`，
+  按 `id` 定位条目、只匹配 `config:` 的直接子键——文件为 `[]` 时追加条目；条目已存在但无该键时
+  插入现有 `config:` 段末；键已存在时原地替换单行（不产生重复行）；嵌套层里的同名字段不会误伤；
+  `config:` 写成内联 `{...}` 时明确报错拒绝改写。写入前自动备份
+  `cordis.patch.yml.bak.<时间戳>`，保留最近 3 份；查看命令同时给出「容忍窗口 = 2 × 间隔」。
+- **接入手册第 9 节「调大 WebSocket 心跳窗口」**：说明 dsh 的心跳机制（默认 2 秒 Ping，
+  连续 2 个周期无响应即 `terminate()`，容忍窗口仅约 4 秒）、取值参考与重启生效，并附
+  「各类断连现象的责任分工」表，把服务端心跳、反向代理、NAT 与浏览器重连行为区分开。
+- 新增 `tests/test_gateway_heartbeat.sh`（37 个断言），覆盖首次写入、重复设置替换、
+  保留其他键与条目、嵌套同名字段不误伤、边界值 1 / 2147483647、非法值拒绝、重置、选项互斥与缺值。
+
+### 变更
+
+- **反向代理模板拆分长连接路径**：站点配置新增 `location = /api/remote.mux`（WebSocket）与
+  `location = /plugins/events`（SSE 事件流），两条路径显式关闭 `proxy_buffering` 与 `gzip`，
+  并启用 `proxy_socket_keepalive on`（nginx ≥ 1.15.6）——此前长连接与普通页面共用 `location /`，
+  给页面加规则会连带影响长连接；SSE 被 gzip 缓冲还会攒帧。
+- **第 2 节新增第 8 条硬性要求**：长连接会被 dsh 自身心跳终结，反向代理只能减少触发、无法阻止。
+- **验证清单新增第 ⑦ 条**：以 `/api/remote.mux` 的 WebSocket 关闭码判定归属，`1006` 且约 4 秒
+  一次指向心跳窗口不足。
+- 排障手册新增「通过域名访问 Web UI 用一会儿就断开、过几秒又自动重连」条目；
+  `docs/usage.md` 对外地址一节与 `README.md` 排障索引补充对应指引。
+
 ## [1.5.2] - 2026-10-18
 
 ### 新增

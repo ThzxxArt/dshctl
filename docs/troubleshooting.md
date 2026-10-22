@@ -212,6 +212,39 @@ bash dshctl.sh --url        # 打印带 token 的完整访问地址
 
 完整要求、nginx 模板与验证清单见 [reverse-proxy.md](reverse-proxy.md)。
 
+### 通过域名访问 Web UI 用一会儿就断开、过几秒又自动重连
+
+**现象**：页面能正常打开，但每隔一阵连接中断，随后自动恢复，反复出现；局域网直连
+却相对稳定。
+
+**原因**：dsh Gateway 的 WebSocket 心跳窗口默认只有约 **4 秒**（每 2 秒发一次 Ping，
+连续 2 个周期没有活动即 `terminate()`）。经过反向代理、跨境链路或移动网络时，
+Ping/Pong 很容易迟到，于是连接被 dsh 自己切断，浏览器再按退避自动重连。
+
+**先确认归属**（三选一即可）：
+
+1. 浏览器 DevTools → 网络 → WS → 选中 `/api/remote.mux`：**关闭码 1006** 基本可确认；
+2. 断开间隔稳定在 4 秒左右 → 心跳判定，而不是链路质量随机波动；
+3. 临时直连 `http://<IP>:<端口>`（不经反代）对比：直连也断 → 判定发生在 dsh 侧。
+
+**修复**：调大 dsh 侧心跳（反代的超时参数管不到这一步）：
+
+```bash
+dshctl --gateway-heartbeat-set 30000 -y   # 约 60 秒容忍，反代场景推荐起点
+dshctl --restart                          # 启动时读取，重启生效
+dshctl --gateway-heartbeat                # 复核当前值与容忍窗口
+```
+
+命令只改 `cordis.patch.yml` 里 `typert-gateway.config.websocketHeartbeatIntervalMs`
+这一行，其他键与条目原样保留，改动前自动备份。想恢复 dsh 默认（4 秒窗口）：
+
+```bash
+dshctl --gateway-heartbeat-reset -y && dshctl --restart
+```
+
+取值为整数毫秒（1..2147483647）。完整取值参考与「各类断连现象的责任分工」见
+[reverse-proxy.md 第 9 节](reverse-proxy.md#9-调大-websocket-心跳窗口)。
+
 ### 浏览器控制台报 CSP 错误（字体 / eval 被拦）
 
 `Refused to load the font 'data:font/...'`、`EvalError: ... 'unsafe-eval' is not an allowed source`
