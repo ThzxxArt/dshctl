@@ -54,7 +54,7 @@ dshctl 把这些收敛为一条命令，并且刻意做成**可反复执行**的
 | 操作系统 | Linux、macOS、WSL（x86_64 / arm64） |
 | Shell | Bash 3.2+（macOS 自带版本可用） |
 | 必备命令 | `bash` `git`（≥2.26）`curl` `tar` |
-| Node.js | 22.19+ 或 24+；不满足时脚本会自动安装 |
+| Node.js | 引导要求 22.19+ 或 24+（缺失时自动安装）；实际下限以源码 `engines.node` 为准（`master` 为 ≥24.9.0），不满足时安装前告警 |
 | 磁盘 | 建议 ≥5 GB 可用（源码 + node_modules + 构建产物） |
 
 可选命令：`xz`（解压 Node 包）、`flock`（并发锁，缺失时用目录锁兜底）、

@@ -49,8 +49,19 @@ bash dshctl.sh --install --clean          # 或删除目录重新克隆
 
 ### Node.js 版本不符
 
-要求 `22.19+` 或 `24+`。脚本会自动安装（nvm 优先，失败则用官方二进制包，落在 `~/.local/node`）。
+引导要求 `22.19+` 或 `24+`。脚本会自动安装（nvm 优先，失败则用官方二进制包，落在 `~/.local/node`）。
 禁止自动安装时加 `--skip-node-install`，只指定版本可加 `--node-major N`。
+
+引导要求不等于源码要求。脚本在克隆/更新后会读取源码 `package.json` 的 `engines.node` 再校验一次
+（`master` 现为 `>=24.9.0`，`0.2.1-rc.3` 为 `^22.19.0 || >=24.0.0`），不满足时打印：
+
+```
+  ⚠ 源码要求 Node.js >=24.9.0，当前为 v22.19.0（来源: <源码目录>/package.json → engines.node）
+```
+
+该告警**不阻断安装**（与 git 版本检查策略一致），但继续使用可能让 `pnpm install`、构建或运行期出错。
+按提示升级 Node 即可；若必须留在旧版本，用 `--ref` 固定到要求更低的 tag。
+`--doctor` 与 `--dry-run` 都会显示「源码要求」一行。
 
 ### corepack / pnpm 准备失败
 

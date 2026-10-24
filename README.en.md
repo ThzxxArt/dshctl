@@ -46,7 +46,9 @@ dshctl --status / --doctor / --restart / --logs
 ## Requirements
 
 Linux, macOS or WSL (x86_64 / arm64); Bash 3.2+; `git` ≥ 2.26, `curl`, `tar`.
-Node.js 22.19+ / 24+ is installed automatically when missing. About 5 GB free disk recommended.
+Node.js 22.19+ / 24+ is installed automatically when missing. The effective floor follows the
+source `engines.node` (`master` requires ≥24.9.0) and is checked right after checkout, with a
+warning when unmet. About 5 GB free disk recommended.
 
 ## Quick start
 

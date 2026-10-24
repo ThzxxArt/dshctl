@@ -120,7 +120,7 @@ GATEWAY_HEARTBEAT_ACTION=""
 GATEWAY_HEARTBEAT_MS=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.6.0"
+DSHCTL_VERSION="1.6.1"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -1353,12 +1353,12 @@ install_node_via_tarball() {
 ensure_node() {
   step "检查 Node.js 运行时"
   if node_ok; then
-    ok "Node.js $(node_ver) 已满足要求（^22.19.0 || >=24.0.0）"
+    ok "Node.js $(node_ver) 满足引导要求（22.19+ / 24+）；源码的实际要求将在获取源码后校验"
     return 0
   fi
 
   if command -v node >/dev/null 2>&1; then
-    warn "当前 Node.js $(node_ver) 不符合要求（需要 22.19+ 或 24+）"
+    warn "当前 Node.js $(node_ver) 不符合引导要求（需要 22.19+ 或 24+）"
   else
     warn "未检测到 Node.js"
   fi
@@ -1759,6 +1759,126 @@ ensure_repo() {
   REPO_HEAD="$(repo_head)"
   apply_local_proxy_after_clone
   ok "源码位置: ${DSH_DIR}（HEAD $(git -C "$DSH_DIR" rev-parse --short HEAD)）"
+}
+
+# -----------------------------------------------------------------------------
+# 源码声明的 Node 要求（package.json → engines.node）
+# -----------------------------------------------------------------------------
+# node_ok 只能给一个保守的引导下界；真正的下限随源码 ref 变化：
+#   0.2.1-rc.3 → "^22.19.0 || >=24.0.0"；master → ">=24.9.0"
+# 所以拿到源码后要按实际声明再校验一次，避免"Node 22 也放行"的旧结论与要求脱节。
+
+# 归一化为三段数字（"22.19" → "22.19.0"）；无法解析返回 1
+node_ver_pad() {
+  local v="${1#v}" a="" b="" c="" rest=""
+  IFS=. read -r a b c rest <<< "$v"
+  case "${a:-}" in ''|*[!0-9]*) return 1 ;; esac
+  case "${b:-0}" in *[!0-9]*) return 1 ;; esac
+  case "${c:-0}" in *[!0-9]*) return 1 ;; esac
+  printf '%s.%s.%s' "$a" "${b:-0}" "${c:-0}"
+}
+
+# 单个比较式：0=满足 1=不满足 2=无法解析；$1 须为归一化后的版本
+# 支持 >= > <= < = ^ ~ 与通配（* / x）
+node_spec_ok() {
+  local ver="$1" spec="$2" op="" bound="" lower="" upper="" major="" minor="" patch=""
+  case "$spec" in
+    ''|'*'|'x'|'X') return 0 ;;
+    '>='*|'<='*|'>'*|'<'*|'^'*|'~'*|'='*)
+      # 运算符取到第一个数字前；用引号包住 op 再剥，避免 ${spec#~} 把 ~ 展开成家目录
+      op="${spec%%[0-9]*}"
+      bound="${spec#"$op"}"
+      ;;
+    *)     op="=";  bound="$spec" ;;
+  esac
+  lower="$(node_ver_pad "$bound")" || return 2
+  case "$op" in
+    '>=') if version_ge "$ver" "$lower"; then return 0; fi; return 1 ;;
+    '<=') if version_ge "$lower" "$ver"; then return 0; fi; return 1 ;;
+    '>')  if version_ge "$lower" "$ver"; then return 1; fi; return 0 ;;
+    '<')  if version_ge "$ver" "$lower"; then return 1; fi; return 0 ;;
+    '=')  if [ "$ver" = "$lower" ]; then return 0; fi; return 1 ;;
+  esac
+  IFS=. read -r major minor patch <<< "$lower"
+  case "$op" in
+    '^')
+      if [ "$major" -gt 0 ]; then upper="$((major + 1)).0.0"
+      elif [ "$minor" -gt 0 ]; then upper="0.$((minor + 1)).0"
+      else upper="0.0.$((patch + 1))"
+      fi ;;
+    '~') upper="$major.$((minor + 1)).0" ;;
+  esac
+  if version_ge "$ver" "$lower" && ! version_ge "$ver" "$upper"; then
+    return 0
+  fi
+  return 1
+}
+
+# npm range 是否被该版本满足：0=满足 1=不满足 2=含无法解析的比较式
+node_range_satisfied() {
+  local ver="$1" range="$2" alt="" spec="" rc=0
+  local unknown=0 alt_failed=0 alt_unknown=0
+  local -a specs
+  if [ -z "${range//[[:space:]]/}" ]; then return 0; fi
+  ver="$(node_ver_pad "$ver")" || return 2
+  range="${range//,/ }"
+  while IFS= read -r alt; do
+    alt="${alt#"${alt%%[![:space:]]*}"}"
+    alt="${alt%"${alt##*[![:space:]]}"}"
+    if [ -z "$alt" ]; then continue; fi
+    alt_failed=0
+    alt_unknown=0
+    IFS=' ' read -r -a specs <<< "$alt"
+    for spec in ${specs[@]+"${specs[@]}"}; do
+      node_spec_ok "$ver" "$spec"
+      rc=$?
+      if [ "$rc" -eq 1 ]; then alt_failed=1; break; fi
+      if [ "$rc" -eq 2 ]; then alt_unknown=1; fi
+    done
+    if [ "$alt_failed" -eq 0 ] && [ "$alt_unknown" -eq 0 ]; then return 0; fi
+    if [ "$alt_unknown" -eq 1 ]; then unknown=1; fi
+  done <<< "${range//||/$'\n'}"
+  if [ "$unknown" -eq 1 ]; then return 2; fi
+  return 1
+}
+
+# 读取源码 package.json 的 engines.node（数组写法按 || 合并）；读不到返回 1
+repo_node_engines() {
+  local pkg="$DSH_DIR/package.json" out=""
+  [ -r "$pkg" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  out="$(node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const e=p&&p.engines; if(e&&e.node!=null) process.stdout.write(Array.isArray(e.node)?e.node.join(" || "):String(e.node));' "$pkg" 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
+}
+
+# 源码实际要求 vs 当前运行时（克隆/更新后调用）
+# 不满足时只告警不阻断：与 git 版本检查一致，是否继续交给使用者判断。
+check_repo_node_engines() {
+  local range="" ver="" rc=0
+  [ -f "$DSH_DIR/package.json" ] || return 0
+  ver="$(node_ver 2>/dev/null || true)"
+  if [ -z "$ver" ]; then return 0; fi
+  if ! range="$(repo_node_engines)"; then
+    info "源码未声明可读的 engines.node，跳过 Node 版本校验。"
+    return 0
+  fi
+  if node_range_satisfied "$ver" "$range"; then rc=0; else rc=$?; fi
+  case "$rc" in
+    0)
+      ok "Node.js ${ver} 满足源码要求（engines.node: ${range}）"
+      ;;
+    2)
+      warn "源码的 engines.node 含无法解析的写法（${range}），已跳过严格校验；请自行确认 Node.js ${ver} 可用。"
+      ;;
+    *)
+      warn "源码要求 Node.js ${range}，当前为 ${ver}（来源: ${DSH_DIR}/package.json → engines.node）"
+      warn "版本过低时 pnpm install / 构建可能失败，或运行期行为异常。"
+      warn "升级后可重试：nvm install ${DSH_NODE_MAJOR} && nvm use ${DSH_NODE_MAJOR}（或 https://nodejs.org/en/download）"
+      warn "如需留在当前 Node，可固定到要求更低的 tag：dshctl --install --ref dsh-v<版本>"
+      ;;
+  esac
+  return 0
 }
 
 # -----------------------------------------------------------------------------
@@ -2718,11 +2838,23 @@ do_doctor() {
   fi
 
   if node_ok; then
-    printf '  Node.js    : ✔ %s（满足要求）\n' "$(node_ver)"
+    printf '  Node.js    : ✔ %s（满足引导要求）\n' "$(node_ver)"
   elif command -v node >/dev/null 2>&1; then
-    printf '  Node.js    : ⚠ %s（不符，将自动安装 v%s）\n' "$(node_ver)" "$DSH_NODE_MAJOR"
+    printf '  Node.js    : ⚠ %s（不符引导要求，将自动安装 v%s）\n' "$(node_ver)" "$DSH_NODE_MAJOR"
   else
     printf '  Node.js    : ⚠ 未安装（将自动安装 v%s）\n' "$DSH_NODE_MAJOR"
+  fi
+  if [ -f "$DSH_DIR/package.json" ] && command -v node >/dev/null 2>&1; then
+    local eng_req="" eng_rc=0
+    if eng_req="$(repo_node_engines)"; then
+      if node_range_satisfied "$(node_ver)" "$eng_req"; then eng_rc=0; else eng_rc=$?; fi
+      case "$eng_rc" in
+        0) printf '  源码要求   : ✔ Node.js %s（engines.node）\n' "$eng_req" ;;
+        2) printf '  源码要求   : ⚠ Node.js %s（写法无法解析，未校验）\n' "$eng_req" ;;
+        *) printf '  源码要求   : ⚠ Node.js %s（当前 %s 不满足）\n' "$eng_req" "$(node_ver)"
+           problems=$((problems + 1)) ;;
+      esac
+    fi
   fi
   printf '  corepack   : %s\n' "$(command -v corepack >/dev/null 2>&1 && echo '✔ 可用' || echo '⚠ 不可用（将退回 npm 安装 pnpm）')"
 
@@ -5473,6 +5605,12 @@ do_dry_run() {
   else
     printf '  Node.js    : 将自动安装 v%s（nvm 优先，官方包兜底）\n' "$DSH_NODE_MAJOR"
   fi
+  if [ -f "$DSH_DIR/package.json" ]; then
+    local eng_req=""
+    if eng_req="$(repo_node_engines)"; then
+      printf '  源码要求   : Node.js %s（engines.node）\n' "$eng_req"
+    fi
+  fi
   printf '  pnpm       : 将准备 pnpm@%s（corepack）\n' "$(repo_pnpm_version)"
 
   if [ -d "$DSH_DIR/.git" ]; then
@@ -5765,6 +5903,7 @@ main() {
 
   ensure_node
   ensure_repo
+  check_repo_node_engines
   preupgrade_backup_if_needed
 
   # 版本就绪后再确定 Web 绑定方式（0.2.1+ 拒绝通配地址）
