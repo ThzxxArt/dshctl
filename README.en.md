@@ -70,7 +70,7 @@ Update, rollback and uninstall:
 
 ```bash
 bash dshctl.sh --install          # update from upstream
-bash dshctl.sh --upgrade-check    # check only
+bash dshctl.sh --upgrade-check    # check by channel (stable / rc / alpha)
 bash dshctl.sh --rollback         # roll back to the previous successful install
 bash dshctl.sh --uninstall        # keep source and data
 bash dshctl.sh --purge -y         # full cleanup (backs up ~/.dsh first)
@@ -88,7 +88,7 @@ bash dshctl.sh --purge -y         # full cleanup (backs up ~/.dsh first)
 | Plugin exemptions | `--plugin-exemptions`, `--plugin-allow SPEC`, `--plugin-revoke SPEC` (dsh 0.2.0+) |
 | Model | `--model-show`, `--model-check`, `--model-fix`, `--model-set-base URL` |
 | Data | `--data-backup`, `--data-restore FILE`, `--data-archive-sessions`, `--data-prune` |
-| Versions | `--rollback [REF]`, `--upgrade-check`, `--backups-list`, `--backups-prune [N]` |
+| Versions | `--rollback [REF]`, `--upgrade-check [--channel auto\|stable\|rc\|alpha\|any]`, `--backups-list`, `--backups-prune [N]` |
 | Web access | `--url`, `--web-lan`, `--host IP`, `--public-url URL`, `--tls-cert FILE`, `--tls-key FILE`, `--trusted-host HOST` |
 | Network | `--git-proxy URL`, `--github-mirror URL`, `--npm-mirror URL`, `--node-mirror URL`, `--no-proxy`, `--no-mirror` |
 | Lifecycle | `--register`, `--unregister`, `--uninstall`, `--purge` |

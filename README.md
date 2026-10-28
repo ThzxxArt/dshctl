@@ -95,7 +95,7 @@ dshctl --status
 
 ```bash
 bash dshctl.sh --install          # 更新到上游最新（自动跳过无变化的构建）
-bash dshctl.sh --upgrade-check    # 只检查上游是否有新版本
+bash dshctl.sh --upgrade-check    # 按 stable/rc/alpha 通道检查上游是否有新版本
 bash dshctl.sh --rollback         # 回退到上一次成功安装的版本
 bash dshctl.sh --uninstall        # 部分卸载（保留源码与运行数据）
 bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理）
@@ -114,7 +114,7 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | 模型 | `--model-show` `--model-check` `--model-fix` `--model-set-base URL` | Base URL 规范检查与修复（0.1.7+ 配置在 profile） |
 | 网关 | `--gateway-heartbeat` / `-set MS` / `-reset` | WebSocket 心跳间隔（默认 4 秒窗口，公网易断连） |
 | 数据 | `--data-backup` `--data-restore FILE` `--data-archive-sessions` `--data-prune` | 备份 / 恢复 / 旧会话归档 / 缓存清理 |
-| 版本 | `--rollback [REF]` `--upgrade-check` | 回退与升级检查 |
+| 版本 | `--rollback [REF]` `--upgrade-check [--channel auto\|stable\|rc\|alpha\|any]` | 回退与按通道升级检查 |
 | 访问 | `--url` `--web-lan` `--host IP` `--public-url URL` `--tls-cert FILE` `--tls-key FILE` `--trusted-host HOST` | 打印带 token 的地址；局域网/对外访问与原生 HTTPS |
 | 备份管理 | `--backups-list` `--backups-prune [N]` | 列出 / 清理 dshctl 产生的备份 |
 | 网络 | `--git-proxy URL` `--github-mirror URL` `--npm-mirror URL` `--node-mirror URL` `--no-proxy` `--no-mirror` | 代理与镜像控制 |

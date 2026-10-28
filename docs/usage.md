@@ -219,13 +219,21 @@ dsh 0.1.7+ 会自动迁移旧 `settings.yaml`，0.2.0 起会话格式也会自�
 ## 7. 版本管理与回退
 
 ```bash
-bash dshctl.sh --upgrade-check    # 对比上游最新 tag / master（只读）
-bash dshctl.sh --rollback         # 回退到上一次成功安装的版本并重新构建
+bash dshctl.sh --upgrade-check                  # 按通道对比上游（只读）
+bash dshctl.sh --upgrade-check --channel rc     # 只关注 rc / stable 晋级
+bash dshctl.sh --rollback                       # 回退到上一次成功安装的版本并重新构建
 bash dshctl.sh --rollback v0.1.2-alpha.1
 ```
 
-`--upgrade-check` 按 semver 比较本地版本与上游最新 `dsh-v*` tag，**含预发布优先级**
-（`0.2.1-alpha.5 < 0.2.1-rc.1 < 0.2.1`），因此 0.2.1 的 alpha → rc 推进不会被漏报。
+dsh 的 tag 分三条发布通道：`stable`（正式版）、`rc`、`alpha`（beta/dev 等其它预发布归入
+`other`）。`--upgrade-check` 会分别列出各通道最新 tag，并按本地版本所在通道的**晋级阶梯**
+比较：stable 只比 stable，rc 比 rc/stable，alpha 比 alpha/rc/stable。
+
+因此同一版本线的 `0.2.1-alpha.5 → 0.2.1-rc.1 → 0.2.1` 不会被漏报；而 rc 用户也不会被
+推荐去装下一版本线的 `0.2.2-alpha.2`（1.6.1 及更早会）。其它通道还有更新时，输出末尾的
+「跨通道参考」会点明；需要主动跟进时加 `--channel alpha`（或 `--channel any` 看全通道最新）。
+
+版本比较按 semver 预发布优先级（`0.2.1-alpha.5 < 0.2.1-rc.1 < 0.2.1`）。
 
 回退只改变源码版本，**不会**回滚 `~/.dsh` 运行数据；新版本写入的数据可能与旧版本不兼容。
 尤其注意：0.1.7+ 已把设置迁移为 profile 配置、0.2.0 会话为 v4 格式，回退后旧版本可能

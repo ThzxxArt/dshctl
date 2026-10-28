@@ -89,7 +89,7 @@ corepack enable && corepack prepare pnpm@<版本> --activate
 bash dshctl.sh --install --clean-build                   # 清理构建产物后重建（推荐）
 bash dshctl.sh --install --force-update --clean-build    # 若更新曾被本地修改阻塞
 bash dshctl.sh --install --clean                         # 彻底重克隆（最彻底）
-bash dshctl.sh --upgrade-check                           # 查看上游最新 tag
+bash dshctl.sh --upgrade-check                           # 按通道查看上游版本
 bash dshctl.sh --install --ref <tag>                     # 锁定到具体版本
 ```
 

@@ -5,6 +5,37 @@
 
 > 说明：1.4.0 是本项目首个以开源仓库形式发布的版本，更早的内部迭代历史不再追溯。
 
+## [1.6.2] - 2026-10-28
+
+### 修复
+
+- **`--upgrade-check` 跨发布阶段误报升级**：上游同时存在 `dsh-v0.2.1-rc.4` 与
+  `dsh-v0.2.2-alpha.2` 时，旧实现把所有 tag 混在一起取「最新」，于是 0.2.1-rc.3 的用户
+  会被推荐安装下一版本线的 alpha（`0.2.2-alpha.2`），看起来像「rc 已经过期」。现在按
+  stable / rc / alpha 通道分别列出最新 tag，结论只在本地通道的晋级阶梯内比较。
+
+### 新增
+
+- **发布通道归类与晋级阶梯**：`version_channel` 按预发布后缀归类为 stable / rc / alpha /
+  other；`channel_ladder` 定义晋级方向——stable 只比 stable，rc 比 rc/stable，alpha 比
+  alpha/rc/stable，beta/dev 等 other 不设限。同一版本线的 alpha → rc → stable 属正常晋级，
+  不会被当成「跨通道」拦掉；rc 用户也不会再被推荐下一版本线的 alpha。
+- **`--channel auto|stable|rc|alpha|any`**：配合 `--upgrade-check` 指定比较通道；
+  `auto`（默认）跟随本地版本所在通道，`any` 保留旧的「全通道最新」视角。该选项仅能与
+  `--upgrade-check` 一起使用，非法取值在参数校验阶段拒绝。
+- **`--upgrade-check` 输出增强**：新增「上游通道」（各通道最新 tag，无则显示「无」）、
+  「比较通道」（当前通道与比较范围）、「升级」（可直接复制的 `--install --ref` 命令）与
+  「跨通道参考」（其它通道还有更新时提示，避免误以为已是最新）。
+- **上游 tag 缓存**：一次 `git ls-remote` 供通道统计与 master 比较复用，避免按通道重复联网。
+- 新增 `tests/test_upgrade_channels.sh`（54 个断言）：覆盖通道归类、晋级阶梯、通道内取最新、
+  跨版本线不误推、`--channel` 四种取值、无正式版、两位数序号与非法用法；
+  `tests/test_version_compare.sh` 同步更新为通道化输出断言。
+
+### 变更
+
+- `--upgrade-check` 输出格式调整：原「上游最新tag / 结论：本地不低于上游最新 tag」两行
+  拆分为「上游通道 / 比较通道 / 结论 / 升级 / 跨通道参考」，便于区分版本线与通道。
+
 ## [1.6.1] - 2026-10-24
 
 ### 修复

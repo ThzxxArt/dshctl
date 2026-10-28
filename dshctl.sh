@@ -120,7 +120,7 @@ GATEWAY_HEARTBEAT_ACTION=""
 GATEWAY_HEARTBEAT_MS=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.6.1"
+DSHCTL_VERSION="1.6.2"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -128,6 +128,10 @@ BACKUP_ACTION=""
 BACKUP_KEEP=""
 DO_URL=0
 DO_UPGRADE_CHECK=0
+UPGRADE_CHANNEL="auto"
+CHANNEL_EXPLICIT=0
+UPSTREAM_TAG_CACHE=""
+UPSTREAM_TAG_LOADED=0
 DO_ROLLBACK=0
 ROLLBACK_REF=""
 DO_VERSION=0
@@ -386,7 +390,7 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
                              dsh 0.2.0 起会话格式自动迁移，一般无需执行）
       --data-prune          清理可安全重建的缓存（图片请求缓存等）
       --rollback [REF]      回退到上一次成功安装的版本（或指定 tag/commit）并重建
-      --upgrade-check       检查上游最新版本与本地差异（只读）
+      --upgrade-check       检查上游版本与本地差异（按 stable/rc/alpha 通道展示，只读）
       --url                 打印 Web UI 访问地址（含 token；局域网开启时含局域网地址）
       --backups-list        列出 dshctl 产生的全部备份（purge/升级前/.env）
       --backups-prune [N]   每类备份保留最近 N 份（默认 3），删除更早的
@@ -520,7 +524,12 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
                             自动重新构建；不回滚 ~/.dsh 数据。注意：0.1.7+ 的配置
                             已迁移到 profile 配置、0.2.0 会话为 v4 格式，回退后可能
                             在旧版本中不可用，执行前请先 --data-backup
-      --upgrade-check       对比上游最新 tag / master 与本地版本（只读）
+      --upgrade-check       对比上游 tag / master 与本地版本（按 stable / rc / alpha
+                            通道分别展示，结论按本地通道的晋级阶梯比较；只读）
+      --channel CHAN        配合 --upgrade-check 指定比较通道: auto(默认，跟随本地
+                            通道) | stable | rc | alpha | any(全通道)
+                            晋级阶梯: stable 只比 stable；rc 比 rc/stable；alpha 比
+                            alpha/rc/stable（同一条版本线的正常晋级方向）
 
 访问助手:
       --url                 打印带 token 的 Web UI 地址（https / 对外地址自动识别）
@@ -574,7 +583,8 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
   bash dshctl.sh --data-backup            # 备份 ~/.dsh（升级前建议）
   bash dshctl.sh --data-archive-sessions  # 旧会话不兼容时软重置（数据保留）
   bash dshctl.sh --rollback               # 回退到上一次成功安装的版本
-  bash dshctl.sh --upgrade-check          # 检查上游最新版本
+  bash dshctl.sh --upgrade-check          # 按通道检查上游版本
+  bash dshctl.sh --upgrade-check --channel rc  # 只关注 rc/stable 晋级
   bash dshctl.sh --url                    # 打印带 token 的访问地址
   bash dshctl.sh --backups-list           # 查看全部备份
   bash dshctl.sh --status / --doctor / --restart / --logs
@@ -846,7 +856,7 @@ validate_args() {
       --gateway-heartbeat|--gateway-heartbeat-set|--gateway-heartbeat-reset) ;;
       --data-backup|--data-restore|--data-archive-sessions|--data-prune) ;;
       --backups-list|--backups-prune) ;;
-      --url|--upgrade-check) ;;
+      --url|--upgrade-check|--channel) ;;
       --profile)   require_mode_profile ;;
       --trusted-host) require_mode "$opt" install service ;;
       --public-url|--tls-cert|--tls-key) require_mode "$opt" install service ;;
@@ -863,6 +873,9 @@ validate_args() {
   done
   if [ -n "$LAST_LINES" ] && [ "$SERVICE_ACTION" != "logs" ]; then
     die "选项 --last 只能与 --logs 一起使用（详见 --help）"
+  fi
+  if [ "$CHANNEL_EXPLICIT" -eq 1 ] && [ "$DO_UPGRADE_CHECK" -ne 1 ]; then
+    die "选项 --channel 只能与 --upgrade-check 一起使用（详见 --help）"
   fi
   if [ "$DO_ROLLBACK" -eq 1 ]; then
     case " ${SEEN_OPTS[*]+"${SEEN_OPTS[*]}"} " in
@@ -909,6 +922,10 @@ validate_args() {
       ''|*[!0-9]*) die "--backups-prune 的保留数量必须是非负整数: $BACKUP_KEEP" ;;
     esac
   fi
+  case "$UPGRADE_CHANNEL" in
+    auto|stable|rc|alpha|any) ;;
+    *) die "--channel 只接受 auto / stable / rc / alpha / any（收到: ${UPGRADE_CHANNEL}）" ;;
+  esac
   if [ "$GATEWAY_HEARTBEAT_ACTION" = "set" ]; then
     case "$GATEWAY_HEARTBEAT_MS" in
       ''|*[!0-9]*) die "--gateway-heartbeat-set 需要正整数毫秒数: ${GATEWAY_HEARTBEAT_MS:-空}" ;;
@@ -1071,6 +1088,7 @@ while [ "$#" -gt 0 ]; do
                          fi ;;
     --url)               DO_URL=1 ;;
     --upgrade-check)     DO_UPGRADE_CHECK=1 ;;
+    --channel)           need_val "$@"; UPGRADE_CHANNEL="$2"; CHANNEL_EXPLICIT=1; shift ;;
     --rollback)          DO_ROLLBACK=1; DO_INSTALL=1
                          if [ "$#" -ge 2 ]; then
                            case "$2" in
@@ -5280,22 +5298,67 @@ version_ge() {
   return 1
 }
 
-# 最新上游 tag（dsh-v*；网络不可达或无仓库时输出空）
-# 定序复用 version_ge：sort -V 在 GNU 与 BSD 上语义不同（BSD 把预发布后缀当字符串比较，
-# 会把 alpha.10 排在 alpha.9 之前），统一走 semver 比较可避免平台差异。
-latest_upstream_tag() {
+# 上游 tag 加载：一次 git ls-remote，结果缓存供多处复用
+# 注意：缓存写入必须在当前 shell 中完成；若在 $(...) 子 shell 里首次调用，结果不会回传，
+# 因此 do_upgrade_check 会先在本体调用一次 upstream_tags_load。
+upstream_tags_load() {
+  [ "$UPSTREAM_TAG_LOADED" -eq 1 ] && return 0
+  UPSTREAM_TAG_LOADED=1
   [ -d "$DSH_DIR/.git" ] || return 0
-  local tags="" best="" t
-  tags="$(git -C "$DSH_DIR" ls-remote --tags origin 'dsh-v*' 2>/dev/null || true)"
-  [ -n "$tags" ] || return 0
+  # peeled tag（^{}）是同一 tag 的提交指针，必须剔除；dsh-v 前缀统一剥离
+  UPSTREAM_TAG_CACHE="$(git -C "$DSH_DIR" ls-remote --tags origin 'dsh-v*' 2>/dev/null \
+    | grep -vF '^{}' \
+    | sed -E 's#.*refs/tags/([^ ]*).*#\1#' \
+    | sed 's/^dsh-v//' || true)"
+  return 0
+}
+
+# 版本通道：stable（正式版）/ rc / alpha / other（beta、dev 等其它预发布）
+version_channel() {
+  local pre=""
+  case "$1" in *-*) pre="${1#*-}" ;; esac
+  case "$pre" in
+    '')     printf 'stable' ;;
+    rc*)    printf 'rc' ;;
+    alpha*) printf 'alpha' ;;
+    *)      printf 'other' ;;
+  esac
+}
+
+# 通道晋级阶梯：stable 只比 stable；rc 比 rc/stable；alpha 比 alpha/rc/stable；
+# other（beta/dev 等）不做限制。参数为通道名，输出允许比较的通道集合。
+# 语义：同一版本线的 alpha → rc → stable 属正常晋级；但 rc 用户不应被推荐去装
+# 下一版本线的 alpha（那正是旧实现把 0.2.2-alpha 当成"最新"误导 rc 用户的原因）。
+channel_ladder() {
+  case "$1" in
+    stable) printf 'stable' ;;
+    rc)     printf 'rc stable' ;;
+    alpha)  printf 'alpha rc stable' ;;
+    *)      printf 'stable rc alpha other' ;;
+  esac
+}
+
+# 在给定通道集合内取最新 tag（$1 为空格分隔的通道列表；输出带 dsh-v 前缀）
+# 纯函数：只读 UPSTREAM_TAG_CACHE，不触网；调用前需先 upstream_tags_load。
+# 定序复用 version_ge：sort -V 在 GNU 与 BSD 上语义不同（BSD 把预发布后缀当字符串
+# 比较，会把 alpha.10 排在 alpha.9 之前），统一走 semver 比较可避免平台差异。
+latest_tag_in_channels() {
+  local allowed=" $1 " best="" t
   while IFS= read -r t; do
     [ -n "$t" ] || continue
-    t="${t#dsh-v}"
+    case "$allowed" in
+      *" $(version_channel "$t") "*) ;;
+      *) continue ;;
+    esac
     if [ -z "$best" ] || version_ge "$t" "$best"; then best="$t"; fi
-  done <<< "$(printf '%s\n' "$tags" | grep -vF '^{}' | sed -E 's#.*refs/tags/([^ ]*).*#\1#' | sed 's/^dsh-v//')"
+  done <<< "$UPSTREAM_TAG_CACHE"
   [ -n "$best" ] || return 0
   printf 'dsh-v%s' "$best"
-  return 0
+}
+
+# 全通道最新 tag（dsh-v*；网络不可达或无仓库时输出空）
+latest_upstream_tag() {
+  latest_tag_in_channels "stable rc alpha other"
 }
 
 do_upgrade_check() {
@@ -5314,20 +5377,64 @@ do_upgrade_check() {
   head="$(git -C "$DSH_DIR" rev-parse --short HEAD 2>/dev/null || true)"
   printf '  源码 HEAD  : %s\n' "${head:-未知}"
   info "查询上游（git ls-remote）..."
-  local latest_tag="" latest_ver="" remote_head="" local_head=""
-  latest_tag="$(latest_upstream_tag || true)"
-  if [ -n "$latest_tag" ]; then
-    latest_ver="${latest_tag#dsh-v}"
-    printf '  上游最新tag: %s\n' "$latest_tag"
-    if [ -n "$ver" ]; then
-      if version_ge "$ver" "$latest_ver"; then
-        printf '  结论       : 本地不低于上游最新 tag\n'
+  local remote_head="" local_head=""
+  # 先在本体加载缓存：$(...) 中首次加载不会回传，避免每个通道都重新联网
+  upstream_tags_load
+  if [ -z "$UPSTREAM_TAG_CACHE" ]; then
+    warn "未能获取上游 tag 列表（网络/代理问题？）。"
+  else
+    local local_ch="" ch="" channels_line="" ch_tag="" ladder="" ladder_disp=""
+    local sel_tag="" sel_label="" abs_tag=""
+    if [ -n "$ver" ]; then local_ch="$(version_channel "$ver")"; fi
+    for ch in stable rc alpha; do
+      ch_tag="$(latest_tag_in_channels "$ch")"
+      channels_line="${channels_line}${channels_line:+ | }${ch} ${ch_tag:-无}"
+    done
+    ch_tag="$(latest_tag_in_channels other)"
+    if [ -n "$ch_tag" ]; then channels_line="${channels_line} | other ${ch_tag}"; fi
+    printf '  上游通道   : %s\n' "$channels_line"
+
+    # 选择比较通道：auto 跟随本地通道的晋级阶梯；--channel 显式覆盖
+    if [ "$UPGRADE_CHANNEL" = "auto" ]; then
+      if [ -n "$local_ch" ]; then
+        ladder="$(channel_ladder "$local_ch")"
+        ladder_disp="$(printf '%s' "$ladder" | tr ' ' '/')"
+        sel_label="auto（本地 ${local_ch}，比较 ${ladder_disp}）"
       else
-        printf '  结论       : 上游有更新版本（可 dshctl --install 升级）\n'
+        ladder="stable rc alpha other"
+        sel_label="auto（未安装，比较全通道）"
+      fi
+    elif [ "$UPGRADE_CHANNEL" = "any" ]; then
+      ladder="stable rc alpha other"
+      sel_label="any（全通道）"
+    else
+      ladder="$(channel_ladder "$UPGRADE_CHANNEL")"
+      if [ "$ladder" = "$UPGRADE_CHANNEL" ]; then
+        sel_label="${UPGRADE_CHANNEL}（--channel ${UPGRADE_CHANNEL}）"
+      else
+        ladder_disp="$(printf '%s' "$ladder" | tr ' ' '/')"
+        sel_label="${UPGRADE_CHANNEL}（--channel ${UPGRADE_CHANNEL}，比较 ${ladder_disp}）"
       fi
     fi
-  else
-    warn "未能获取上游 tag 列表（网络/代理问题？）。"
+    printf '  比较通道   : %s\n' "$sel_label"
+
+    sel_tag="$(latest_tag_in_channels "$ladder")"
+    if [ -z "$ver" ]; then
+      printf '  结论       : 本地未安装，无法比较（该通道最新: %s）\n' "${sel_tag:-无}"
+    elif [ -z "$sel_tag" ]; then
+      printf '  结论       : 上游暂无该通道 tag（可用 --channel auto / any 切换比较范围）\n'
+    elif version_ge "$ver" "${sel_tag#dsh-v}"; then
+      printf '  结论       : 本地已是该通道最新（%s）\n' "$sel_tag"
+    else
+      printf '  结论       : 上游有更新版本（%s → %s）\n' "$ver" "${sel_tag#dsh-v}"
+      printf '  升级       : dshctl --install --ref %s\n' "$sel_tag"
+    fi
+
+    # 跨通道提示：其它通道还有更新的 tag 时明确指出，避免"以为已是最新"
+    abs_tag="$(latest_upstream_tag)"
+    if [ -n "$abs_tag" ] && [ "$abs_tag" != "$sel_tag" ]; then
+      printf '  跨通道参考 : 全通道最新为 %s（dshctl --channel any --upgrade-check）\n' "$abs_tag"
+    fi
   fi
   remote_head="$(git -C "$DSH_DIR" ls-remote origin HEAD 2>/dev/null | awk '{print $1}' || true)"
   local_head="$(git -C "$DSH_DIR" rev-parse HEAD 2>/dev/null || true)"

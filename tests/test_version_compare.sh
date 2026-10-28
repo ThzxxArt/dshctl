@@ -79,15 +79,15 @@ set_local_version 0.2.1-alpha.5
 run_dshctl --upgrade-check
 assert_rc 0 "alpha.5 上 --upgrade-check 退出码为 0"
 assert_stdout_contains "本地 dsh   : 0.2.1-alpha.5" "读取本地 dsh 版本"
-assert_stdout_contains "上游最新tag: dsh-v0.2.1-rc.2" "选中上游最新 tag（剔除 peeled tag）"
+assert_stdout_contains "rc dsh-v0.2.1-rc.2" "通道行选中 rc.2（剔除 peeled tag）"
 assert_stdout_contains "上游有更新版本" "alpha.5 < rc.2：提示可升级"
-assert_stdout_not_contains "本地不低于上游最新 tag" "不再误报「本地已是最新」"
+assert_stdout_not_contains "本地已是该通道最新" "不再误报「本地已是最新」"
 
 # 2) 本地已是上游最新 rc.2
 set_local_version 0.2.1-rc.2
 run_dshctl --upgrade-check
 assert_rc 0 "rc.2 上 --upgrade-check 退出码为 0"
-assert_stdout_contains "本地不低于上游最新 tag" "rc.2 与上游 rc.2 相同：判为不低于"
+assert_stdout_contains "本地已是该通道最新（dsh-v0.2.1-rc.2）" "rc.2 与上游 rc.2 相同：判为已最新"
 assert_stdout_not_contains "上游有更新版本" "同版本不再提示升级"
 
 # 3) 预发布序号两位数：按字符串定序会误选 alpha.9
@@ -95,7 +95,7 @@ emit_tags dsh-v0.2.1-alpha.9 dsh-v0.2.1-alpha.10
 set_local_version 0.2.1-alpha.9
 run_dshctl --upgrade-check
 assert_rc 0 "alpha.9 上 --upgrade-check 退出码为 0"
-assert_stdout_contains "上游最新tag: dsh-v0.2.1-alpha.10" "tag 定序按数值取 alpha.10（非字符串序）"
+assert_stdout_contains "alpha dsh-v0.2.1-alpha.10" "tag 定序按数值取 alpha.10（非字符串序）"
 assert_stdout_contains "上游有更新版本" "alpha.9 < alpha.10：提示可升级"
 
 finish
