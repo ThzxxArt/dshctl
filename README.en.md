@@ -35,8 +35,9 @@ dshctl --status / --doctor / --restart / --logs
 - Web exposure: `--url`, `--web-lan` / `--host <IP>` (binds a concrete interface address on
   dsh 0.2.1+, or the `0.0.0.0` patch on older dsh), `--public-url` for reverse-proxy fronting,
   `--tls-cert`/`--tls-key` native HTTPS, `--port 0` for an OS-assigned port.
-- Plugin management per profile, including pnpm `minimumReleaseAge` policy audit, lockfile
-  repair, and the dsh 0.2.0+ plugin compatibility gate (exact-version exemption management).
+- Plugin management per profile: npm names, GitHub Release `.tgz` assets, git specs, and local
+  paths, plus pnpm `minimumReleaseAge` policy audit, lockfile repair, and the dsh 0.2.0+ plugin
+  compatibility gate (exact-version exemption management).
 - Model config checks/fixes for the dsh 0.1.6+ Messages protocol (Base URL must not be in `.env`),
   with dsh 0.1.7+ settings stored in the profile's `cordis.patch.yml`.
 - Data maintenance: backup/restore/session archive/cache prune, all destructive actions confirmed

@@ -41,7 +41,7 @@ dshctl 把这些收敛为一条命令，并且刻意做成**可反复执行**的
   所有破坏性操作需确认，均支持 `--dry-run` 预览。
 - **运维闭环**：`--status` / `--doctor` / `--start|--stop|--restart|--logs`，可选 `systemd --user` 常驻。
 - **访问与暴露**：`--url` 打印带 token 地址；`--web-lan` / `--host <IP>` 局域网绑定（按 dsh 版本自动选择具体网卡地址或旧版 `0.0.0.0` 补丁）；`--public-url` 反向代理对外地址；`--tls-cert` / `--tls-key` 原生 HTTPS；`--port 0` 系统分配端口。
-- **插件管理**：profile 级增删改查，pnpm 11 供应链策略（`minimumReleaseAge`）的审计、等待时间预估与锁文件重建；支持 dsh 0.2.0+ 的插件兼容性门禁（精确版本豁免的查询/授予/撤销）。
+- **插件管理**：profile 级增删改查，支持 npm 包名、GitHub Release 的 `.tgz` 资产、git 与本地路径；pnpm 11 供应链策略（`minimumReleaseAge`）的审计、等待时间预估与锁文件重建；支持 dsh 0.2.0+ 的插件兼容性门禁（精确版本豁免的查询/授予/撤销）。
 - **模型排障**：针对 dsh 0.1.6+ 的 Messages 协议变化，检查/修复非法的 `DEEPSEEK_BASE_URL`；适配 0.1.7+ 的配置迁移（profile 的 `cordis.patch.yml`）。
 - **数据维护**：备份、恢复、旧会话归档、可重建缓存清理，全部带自动备份。
 - **版本管理**：升级检查、一键回退到上一次成功安装的版本、备份清单与保留策略。

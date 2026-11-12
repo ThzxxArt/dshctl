@@ -5,6 +5,30 @@
 
 > 说明：1.4.0 是本项目首个以开源仓库形式发布的版本，更早的内部迭代历史不再追溯。
 
+## [1.6.3] - 2026-11-12
+
+### 新增
+
+- **URL 规格安装提示**：`--plugin-add` 接受 http(s) 的 `.tgz` / `.tar.gz`（例如 GitHub
+  Release 里的 npm tarball；此前已可透传，但没有文档与诊断）。安装失败时按 URL 形态给出
+  可操作提示：`.zip`、GitHub “Source code” 源码归档（`archive/` / `tarball/`）、release 中
+  非 tarball 资产，以及 `.tgz` 下载失败（私有仓库凭据 / 未声明 `dsh.bundle`）。
+- **URL 依赖升级提示**：以 URL 安装的插件会被 pnpm 锁定到该地址。安装成功后提示
+  `--plugin-update` 不会替换它；`--plugin-update` 执行前扫描 profile 依赖，列出 URL 依赖
+  并说明升级方式。
+
+### 文档
+
+- `--plugin-add` 帮助与示例补充 GitHub Release `.tgz` 写法；`docs/usage.md` 新增
+  「从 GitHub Release 安装」小节，说明 npm pack 布局、`dsh.bundle` 要求、与 `github:`
+  源码安装的区别及构建授权差异；README 中英文同步。
+
+### 测试
+
+- 新增 `tests/test_plugin_url_specs.sh`（21 个断言）：URL 规格透传、成功后锁定提示、
+  `.zip` / 源码归档 / 无扩展名 URL 的失败提示、`--plugin-update` 的 URL 依赖检测与
+  普通版本范围依赖不误报。
+
 ## [1.6.2] - 2026-10-28
 
 ### 修复

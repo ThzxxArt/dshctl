@@ -145,7 +145,29 @@ bash dshctl.sh --plugin-why dsh-session-search    # 依赖来源溯源
 bash dshctl.sh --profile work --plugin-list       # 指定其他 profile
 ```
 
-支持的规格格式：npm 包名、`github:owner/repo#ref`、`link:路径`（本地路径会自动转为绝对路径）。
+支持的规格格式：npm 包名、`github:owner/repo#ref`、`link:路径`（本地路径会自动转为绝对路径）、
+以及 http(s) 的 `.tgz` / `.tar.gz` 地址（例如 GitHub Release 里的 npm tarball）。
+
+### 从 GitHub Release 安装（.tgz 资产）
+
+`--plugin-add` 也接受 http(s) URL，DSH 会原样交给 pnpm 按远程 tarball 安装：
+
+```bash
+bash dshctl.sh --plugin-add \
+  'https://github.com/<owner>/<repo>/releases/download/v1.2.3/<包名>-1.2.3.tgz'
+```
+
+要求与限制：
+
+- 资产必须是 `npm pack` 生成的 `.tgz` / `.tar.gz`（包根目录含 `package/package.json`）。
+  GitHub 自动生成的 “Source code” 归档与 `.zip` 都不是这种布局，无法安装；
+  dshctl 在失败后会按 URL 形态给出对应提示。
+- 包必须声明 `dsh.bundle`，否则会装成普通依赖、不激活任何层（`--plugin-list` 会标为「依赖」）。
+- URL 依赖锁定到该地址：`--plugin-update` 不会升级它，需重新 `--plugin-add` 新版本 URL。
+- 与 `github:owner/repo#tag` 的区别：后者拉源码，需要作者提供自包含 `prepare`，
+  并由 profile 的 `pnpm-workspace.yaml` 中 `allowBuilds` 授权；release 的 `.tgz`
+  是预构建产物，不需要构建授权。
+- 安装前确认来源可信——插件代码会在你的机器上执行。
 
 ### 供应链策略（minimumReleaseAge）
 

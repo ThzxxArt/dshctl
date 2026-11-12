@@ -120,7 +120,7 @@ GATEWAY_HEARTBEAT_ACTION=""
 GATEWAY_HEARTBEAT_MS=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.6.2"
+DSHCTL_VERSION="1.6.3"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -371,7 +371,8 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
       --register            把本脚本注册为全局命令 dshctl（软链到 ~/.local/bin）
       --unregister          移除全局命令 dshctl（仅删除本脚本创建的链接）
       --plugin-list         列出 profile 已装插件（bundle / 普通依赖）
-      --plugin-add SPEC...  安装插件（支持多个；npm 包名 / github:owner/repo#ref / link:路径）
+      --plugin-add SPEC...  安装插件（支持多个；npm 包名 / github:owner/repo#ref /
+                            link:路径 / https://.../x.tgz（GitHub Release 的 npm tarball））
       --plugin-remove NAME...  卸载插件（支持多个）
       --plugin-update [NAME...]  更新插件（不带名字 = 全部更新）
       --plugin-why NAME     查看插件依赖来源（排障用）
@@ -569,6 +570,7 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
   bash dshctl.sh --plugin-list            # 查看已装插件
   bash dshctl.sh --plugin-add github:dsh-external/dsh-session-search#main
   bash dshctl.sh --plugin-add @deepseek-ai/dsh-subagent-codex
+  bash dshctl.sh --plugin-add 'https://github.com/owner/repo/releases/download/v1.2.3/pkg-1.2.3.tgz'
   bash dshctl.sh --plugin-remove dsh-session-search
   bash dshctl.sh --plugin-update          # 更新全部插件
   bash dshctl.sh --plugin-repair          # 修复 pnpm 供应链策略拦截（重建 profile 锁文件）
@@ -3349,6 +3351,104 @@ resolve_plugin_spec() {
   printf '%s%s' "$prefix" "$path"
 }
 
+# 插件规格是否为 http(s) URL（DSH 原样交给 pnpm 按远程 tarball 安装）
+plugin_spec_is_url() {
+  case "$1" in
+    http://*|https://*) return 0 ;;
+  esac
+  return 1
+}
+
+# URL 规格指向的资产类型：tgz | zip | source | asset | generic
+# 注意顺序：GitHub 源码归档同样以 .tar.gz 结尾，必须先按 archive/tarball 识别。
+plugin_url_kind() {
+  local u="${1%%#*}"
+  u="${u%%\?*}"
+  case "$u" in
+    *.zip) printf 'zip' ;;
+    */archive/*|*/tarball/*|*/zipball/*) printf 'source' ;;
+    *.tgz|*.tar.gz) printf 'tgz' ;;
+    *"/releases/download/"*) printf 'asset' ;;
+    *) printf 'generic' ;;
+  esac
+}
+
+# 安装失败后，对 URL 规格补充「为什么不行 / 应该用什么」的提示
+plugin_url_failure_hint() {
+  local spec kind=""
+  for spec in ${PLUGIN_SPECS[@]+"${PLUGIN_SPECS[@]}"}; do
+    plugin_spec_is_url "$spec" || continue
+    kind="$(plugin_url_kind "$spec")"
+    case "$kind" in
+      zip)
+        warn "URL 指向 .zip：pnpm 只接受 npm pack 生成的 .tgz / .tar.gz，zip 不能直接安装。"
+        warn "  请改用 release 中形如 <包名>-<版本>.tgz 的资产，或改用 github:owner/repo#tag 从源码安装。"
+        ;;
+      source)
+        warn "URL 指向源码归档（archive / tarball）：包根目录是 <repo>-<tag>/ 而不是 package/，不能作为插件安装。"
+        warn "  请改用 release 中 npm pack 生成的 .tgz 资产，或改用 github:owner/repo#tag。"
+        ;;
+      tgz)
+        warn "URL 是 .tgz / .tar.gz 但安装失败：确认资产地址可访问（私有仓库需要凭据），且包内声明 dsh.bundle。"
+        ;;
+      asset)
+        warn "URL 指向 release 资产，但不是 .tgz / .tar.gz：请选择 npm pack 生成的 tarball 资产。"
+        ;;
+      *)
+        warn "URL 规格按远程 tarball 处理：必须是 npm pack 生成的 .tgz / .tar.gz，且包内声明 dsh.bundle。"
+        ;;
+    esac
+    warn "  GitHub Release 写法: --plugin-add 'https://github.com/<owner>/<repo>/releases/download/v1.2.3/<包名>-1.2.3.tgz'"
+    return 0
+  done
+  return 0
+}
+
+# 安装成功后提示 URL 依赖的升级方式
+plugin_url_locked_hint() {
+  local spec
+  for spec in ${PLUGIN_SPECS[@]+"${PLUGIN_SPECS[@]}"}; do
+    plugin_spec_is_url "$spec" || continue
+    warn "该插件以 URL 依赖安装，版本锁定到该地址；--plugin-update 不会替换它。"
+    warn "升级请重新执行 --plugin-add 指向新版本资产的 URL。"
+    return 0
+  done
+  return 0
+}
+
+# 列出 profile 中以 http(s) URL 作为版本规格的依赖（每行一个包名）
+plugin_url_deps() {
+  local pkg="$PROFILES_DIR/$PLUGIN_PROFILE/package.json"
+  [ -f "$pkg" ] || return 0
+  awk '
+    /^[[:space:]]*"dependencies"[[:space:]]*:/ { in_deps = 1; next }
+    in_deps && /^[[:space:]]*}/ { in_deps = 0 }
+    in_deps {
+      line = $0
+      if (match(line, /"[^"]+"[[:space:]]*:[[:space:]]*"https?:\/\//)) {
+        name = substr(line, 1, RSTART + RLENGTH - 1)
+        sub(/^[[:space:]]*"/, "", name)
+        sub(/".*/, "", name)
+        print name
+      }
+    }
+  ' "$pkg" 2>/dev/null || true
+}
+
+plugin_warn_url_deps() {
+  local deps="" name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    deps="${deps}${deps:+, }${name}"
+  done <<EOF
+$(plugin_url_deps)
+EOF
+  [ -n "$deps" ] || return 0
+  warn "以下插件使用 URL 依赖，pnpm update 不会升级它们: ${deps}"
+  warn "升级需重新 --plugin-add 指向新版本资产的 URL。"
+  return 0
+}
+
 plugin_run() {
   local profile="$1"; shift
   "$HOME/.local/bin/dsh" plugin --profile "$profile" "$@"
@@ -3770,6 +3870,7 @@ do_plugin_action() {
     remove) info "卸载插件: ${specs[*]+"${specs[*]}"}" ;;
     update)
       if [ "${#specs[@]}" -gt 0 ]; then info "更新插件: ${specs[*]+"${specs[*]}"}"; else info "更新全部插件..."; fi
+      plugin_warn_url_deps
       ;;
     why)    info "依赖溯源: ${specs[0]}" ;;
     repair) info "重建 profile 锁文件（pnpm clean --lockfile + pnpm install）..." ;;
@@ -3793,6 +3894,9 @@ do_plugin_action() {
       ;;
   esac
   if [ "$rc" -ne 0 ]; then
+    if [ "$PLUGIN_ACTION" = "add" ]; then
+      plugin_url_failure_hint
+    fi
     plugin_failure_hint
     die "插件${action_cn}失败（退出码 ${rc}，详见上方输出）。"
   fi
@@ -3800,6 +3904,9 @@ do_plugin_action() {
   case "$PLUGIN_ACTION" in
     add|remove|update|repair)
       ok "插件${action_cn}完成（profile: ${profile}）"
+      if [ "$PLUGIN_ACTION" = "add" ]; then
+        plugin_url_locked_hint
+      fi
       maybe_restart_after_plugin_change
       ;;
   esac
