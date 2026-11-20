@@ -120,7 +120,7 @@ GATEWAY_HEARTBEAT_ACTION=""
 GATEWAY_HEARTBEAT_MS=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.6.3"
+DSHCTL_VERSION="1.6.4"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -5945,7 +5945,7 @@ summary() {
 启动方式:
   1) 启动器   : dsh web
   2) 直接运行 : cd "$DSH_DIR" && $direct_cmd
-  3) 临时体验 : npx @deepseek-ai/dsh@next web（npm 的 latest 标签落后于仓库线）
+  3) 临时体验 : npx @deepseek-ai/dsh@next web（免本地构建，用 npm 发布版）
 
 Web UI 地址: $scheme://$addr_host:$port_disp
 访问范围 : $web_scope
