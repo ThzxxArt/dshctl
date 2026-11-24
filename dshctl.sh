@@ -19,6 +19,7 @@
 #  运维能力：--status 状态 / --doctor 体检 / --start|--stop|--restart|--logs 服务控制
 #  插件能力：--plugin-list / --plugin-add / --plugin-remove / --plugin-update / --plugin-why
 #             / --plugin-repair / --plugin-policy* / --plugin-exemptions / --plugin-allow / --plugin-revoke
+#             / --plugin-registry（单次 add/update/repair 指定 npm 注册表）
 #             （--profile 指定 profile，默认 web；插件变更后按需重启服务，0.2.1+ 可热重载）
 #  模型维护：--model-show / --model-check / --model-fix / --model-set-base
 #             （0.1.6 起 Messages 协议；0.1.7+ 配置位于 profile 的 cordis.patch.yml）
@@ -114,13 +115,14 @@ DO_CLEAN_BUILD=0
 PLUGIN_ACTION=""
 PLUGIN_PROFILE="web"
 PLUGIN_SPECS=()
+PLUGIN_REGISTRY=""
 MODEL_ACTION=""
 MODEL_BASE_URL=""
 GATEWAY_HEARTBEAT_ACTION=""
 GATEWAY_HEARTBEAT_MS=""
 
 # dshctl 自身版本
-DSHCTL_VERSION="1.6.4"
+DSHCTL_VERSION="1.6.5"
 # 新操作组全局状态
 DATA_ACTION=""
 DATA_ARCHIVE=""
@@ -485,6 +487,10 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
             engines.dsh，未声明时回退 peerDependencies）：不兼容的安装会被拒绝并
             回滚；已安装但未豁免的插件会被启动拒载（--plugin-exemptions 查看，
             --plugin-allow 授予精确版本豁免）。
+      --plugin-registry URL 插件 add/update/repair 本次使用的 npm 注册表（如
+            https://registry.npmjs.org/），透传为 dsh plugin ... --registry=URL；
+            仅本次生效，不写入 profile 配置；repair 只传给 install 步骤。
+            亦可写为 --registry URL / --registry=URL
 
 模型维护（dsh 0.1.6+ Base URL 配置规范排障）:
       --model-show          查看生效的模型配置（key 脱敏、来源标注、合规性检查）
@@ -573,6 +579,8 @@ dshctl.sh — DeepSeek Harness (dsh) 安装 · 运维 · 清理 一体化脚本
   bash dshctl.sh --plugin-add 'https://github.com/owner/repo/releases/download/v1.2.3/pkg-1.2.3.tgz'
   bash dshctl.sh --plugin-remove dsh-session-search
   bash dshctl.sh --plugin-update          # 更新全部插件
+  bash dshctl.sh --plugin-update --plugin-registry https://registry.npmjs.org/
+                                          # 本次更新走官方源（不写 profile 配置）
   bash dshctl.sh --plugin-repair          # 修复 pnpm 供应链策略拦截（重建 profile 锁文件）
   bash dshctl.sh --plugin-policy          # 审计 policy 状态与违规包
   bash dshctl.sh --plugin-policy-set 0    # 关闭 minimumReleaseAge（0 分钟）
@@ -751,6 +759,34 @@ require_mode_profile() {
   die "选项 --profile 不能与 $MODE 操作一起使用（仅限插件管理 / 模型维护命令与服务控制，详见 --help）"
 }
 
+# --plugin-registry 专用校验：只能与插件管理命令一起使用
+require_mode_plugin_registry() {
+  if [ "$MODE" = "plugins" ]; then return 0; fi
+  if [ -z "$MODE" ]; then
+    die "选项 --plugin-registry 只能与插件管理命令一起使用（--plugin-add / --plugin-update / --plugin-repair，详见 --help）"
+  fi
+  die "选项 --plugin-registry 不能与 $MODE 操作一起使用（仅限插件管理命令，详见 --help）"
+}
+
+# 规范化并校验 npm 注册表 URL：仅接受 http(s)、拒绝空白/查询串/片段，去掉末尾斜杠
+normalize_plugin_registry() {
+  local url="$1"
+  case "$url" in
+    http://*|https://*) ;;
+    *) die "--plugin-registry 需要 http(s):// 开头的 URL（收到: ${url:-（空）}）" ;;
+  esac
+  case "$url" in
+    *[[:space:]]*) die "--plugin-registry URL 不能包含空白字符: $url" ;;
+    *\?*|*\#*)    die "--plugin-registry 不支持查询串或片段: $url" ;;
+  esac
+  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
+  local host="${url#*://}"
+  case "$host" in
+    ""|/*) die "--plugin-registry URL 缺少主机名: $url" ;;
+  esac
+  printf '%s' "$url"
+}
+
 validate_args() {
   # 1) 操作互斥（--dry-run 是修饰符，不算操作）
   local -a modes=()
@@ -860,6 +896,7 @@ validate_args() {
       --backups-list|--backups-prune) ;;
       --url|--upgrade-check|--channel) ;;
       --profile)   require_mode_profile ;;
+      --plugin-registry|--registry|--plugin-registry=*|--registry=*) require_mode_plugin_registry ;;
       --trusted-host) require_mode "$opt" install service ;;
       --public-url|--tls-cert|--tls-key) require_mode "$opt" install service ;;
       --host)      require_mode "$opt" install ;;
@@ -875,6 +912,13 @@ validate_args() {
   done
   if [ -n "$LAST_LINES" ] && [ "$SERVICE_ACTION" != "logs" ]; then
     die "选项 --last 只能与 --logs 一起使用（详见 --help）"
+  fi
+  if [ -n "$PLUGIN_REGISTRY" ]; then
+    case "$PLUGIN_ACTION" in
+      add|update|repair) ;;
+      *) die "选项 --plugin-registry 仅支持 --plugin-add / --plugin-update / --plugin-repair（当前操作: --plugin-${PLUGIN_ACTION:-未指定}）" ;;
+    esac
+    PLUGIN_REGISTRY="$(normalize_plugin_registry "$PLUGIN_REGISTRY")"
   fi
   if [ "$CHANNEL_EXPLICIT" -eq 1 ] && [ "$DO_UPGRADE_CHECK" -ne 1 ]; then
     die "选项 --channel 只能与 --upgrade-check 一起使用（详见 --help）"
@@ -1067,6 +1111,13 @@ while [ "$#" -gt 0 ]; do
     --plugin-exemptions) PLUGIN_ACTION="exemptions" ;;
     --plugin-allow)      need_val "$@"; PLUGIN_ACTION="allow-version"; PLUGIN_SPECS+=("$2"); shift ;;
     --plugin-revoke)     need_val "$@"; PLUGIN_ACTION="revoke-version"; PLUGIN_SPECS+=("$2"); shift ;;
+    --plugin-registry|--registry)
+                         need_val "$@"
+                         [ -n "$2" ] || die "选项 --plugin-registry 缺少注册表 URL"
+                         PLUGIN_REGISTRY="$2"; shift ;;
+    --plugin-registry=*|--registry=*)
+                         PLUGIN_REGISTRY="${1#*=}"
+                         [ -n "$PLUGIN_REGISTRY" ] || die "选项 --plugin-registry 缺少注册表 URL" ;;
     --profile)           need_val "$@"; PLUGIN_PROFILE="$2"; shift ;;
     --model-show)        MODEL_ACTION="show" ;;
     --model-check)       MODEL_ACTION="check" ;;
@@ -1589,6 +1640,8 @@ apply_mirrors() {
   if [ -n "$DSH_NPM_MIRROR" ]; then
     export npm_config_registry="$DSH_NPM_MIRROR"
     export NPM_CONFIG_REGISTRY="$DSH_NPM_MIRROR"
+    export pnpm_config_registry="$DSH_NPM_MIRROR"
+    export PNPM_CONFIG_REGISTRY="$DSH_NPM_MIRROR"
     export COREPACK_NPM_REGISTRY="$DSH_NPM_MIRROR"
     info "npm/pnpm 使用镜像: $DSH_NPM_MIRROR"
   fi
@@ -3787,15 +3840,21 @@ do_plugin_action() {
     esac
   fi
 
+  if [ -n "$PLUGIN_REGISTRY" ]; then
+    info "插件注册表: ${PLUGIN_REGISTRY}（仅本次操作）"
+  fi
+
   if [ "$DRY_RUN" -eq 1 ] && [ "$PLUGIN_ACTION" != "policy" ]; then
+    local dry_registry=""
+    [ -n "$PLUGIN_REGISTRY" ] && dry_registry=" --registry=$PLUGIN_REGISTRY"
     case "$PLUGIN_ACTION" in
-      repair)       info "[dry-run] 将执行: dsh plugin --profile $profile clean --lockfile && dsh plugin --profile $profile install" ;;
+      repair)       info "[dry-run] 将执行: dsh plugin --profile $profile clean --lockfile && dsh plugin --profile $profile install${dry_registry}" ;;
       policy-set)   info "[dry-run] 将执行: dsh plugin --profile $profile config set minimumReleaseAge ${PLUGIN_SPECS[0]:-?} --location project" ;;
       policy-reset) info "[dry-run] 将执行: dsh plugin --profile $profile config delete minimumReleaseAge --location project" ;;
       exemptions)   info "[dry-run] 将执行: dsh plugin --profile $profile version-exemptions" ;;
       allow-version) info "[dry-run] 将执行: dsh plugin --profile $profile allow-version ${PLUGIN_SPECS[0]:-?} --dsh-version ${dsh_ver:-<当前 dsh 版本>} --accept-risk" ;;
       revoke-version) info "[dry-run] 将执行: dsh plugin --profile $profile revoke-version ${PLUGIN_SPECS[0]:-?} --dsh-version ${dsh_ver:-<当前 dsh 版本>}" ;;
-      *)            info "[dry-run] 将执行: dsh plugin --profile $profile $PLUGIN_ACTION ${PLUGIN_SPECS[*]:-}" ;;
+      *)            info "[dry-run] 将执行: dsh plugin --profile $profile $PLUGIN_ACTION${PLUGIN_SPECS[*]:+ ${PLUGIN_SPECS[*]}}${dry_registry}" ;;
     esac
     return 0
   fi
@@ -3847,6 +3906,10 @@ do_plugin_action() {
   esac
 
   local -a specs=()
+  local -a registry_args=()
+  if [ -n "$PLUGIN_REGISTRY" ]; then
+    registry_args=("--registry=$PLUGIN_REGISTRY")
+  fi
   local s
   case "$PLUGIN_ACTION" in
     add|remove)
@@ -3882,14 +3945,14 @@ do_plugin_action() {
 
   local rc=0
   case "$PLUGIN_ACTION" in
-    add)    plugin_run "$profile" add ${specs[@]+"${specs[@]}"} || rc=$? ;;
+    add)    plugin_run "$profile" add ${specs[@]+"${specs[@]}"} ${registry_args[@]+"${registry_args[@]}"} || rc=$? ;;
     remove) plugin_run "$profile" remove ${specs[@]+"${specs[@]}"} || rc=$? ;;
-    update) plugin_run "$profile" update ${specs[@]+"${specs[@]}"} || rc=$? ;;
+    update) plugin_run "$profile" update ${specs[@]+"${specs[@]}"} ${registry_args[@]+"${registry_args[@]}"} || rc=$? ;;
     why)    plugin_run "$profile" why "${specs[0]}" || rc=$? ;;
     repair)
       plugin_run "$profile" clean --lockfile || rc=$?
       if [ "$rc" -eq 0 ]; then
-        plugin_run "$profile" install || rc=$?
+        plugin_run "$profile" install ${registry_args[@]+"${registry_args[@]}"} || rc=$?
       fi
       ;;
   esac

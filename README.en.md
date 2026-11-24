@@ -87,6 +87,7 @@ bash dshctl.sh --purge -y         # full cleanup (backs up ~/.dsh first)
 | Plugins | `--plugin-list/add/remove/update/why/repair` |
 | Plugin policy | `--plugin-policy`, `--plugin-policy-set N`, `--plugin-policy-reset` |
 | Plugin exemptions | `--plugin-exemptions`, `--plugin-allow SPEC`, `--plugin-revoke SPEC` (dsh 0.2.0+) |
+| Plugin registry | `--plugin-registry URL` (alias `--registry=URL`) — per-operation npm registry for add/update/repair |
 | Model | `--model-show`, `--model-check`, `--model-fix`, `--model-set-base URL` |
 | Data | `--data-backup`, `--data-restore FILE`, `--data-archive-sessions`, `--data-prune` |
 | Versions | `--rollback [REF]`, `--upgrade-check [--channel auto\|stable\|rc\|alpha\|any]`, `--backups-list`, `--backups-prune [N]` |

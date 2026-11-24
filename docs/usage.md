@@ -148,6 +148,30 @@ bash dshctl.sh --profile work --plugin-list       # 指定其他 profile
 支持的规格格式：npm 包名、`github:owner/repo#ref`、`link:路径`（本地路径会自动转为绝对路径）、
 以及 http(s) 的 `.tgz` / `.tar.gz` 地址（例如 GitHub Release 里的 npm tarball）。
 
+### 指定 npm 注册表
+
+镜像同步滞后（例如 npmmirror 的 `latest` 还停在旧版），或需要临时从官方源取某个版本时，
+用 `--plugin-registry` 把**本次操作**固定到指定源（别名 `--registry`，两种写法都支持）：
+
+```bash
+bash dshctl.sh --plugin-update --plugin-registry https://registry.npmjs.org/
+bash dshctl.sh --plugin-add dsh-novel-write-engine@0.2.11 \
+  --plugin-registry=https://registry.npmjs.org/
+bash dshctl.sh --plugin-repair --registry https://registry.npmjs.org/
+```
+
+行为与边界：
+
+- 仅对 `--plugin-add` / `--plugin-update` / `--plugin-repair` 生效；用于其他插件命令
+  （`--plugin-list` / `--plugin-remove` / `--plugin-why` 等）会直接报错。
+- 实现上透传为 `dsh plugin ... --registry=URL`，由 pnpm 使用；只影响本次进程，
+  **不写入** profile 配置。需要持久生效时，在 `~/.dsh/profiles/<name>/.npmrc` 写
+  `registry=...`。
+- `--plugin-repair` 的注册表只传给重建锁文件的 `install` 步骤，`clean --lockfile`
+  不带该参数。
+- `--npm-mirror` 是安装流程使用的镜像（并同时导出 `pnpm_config_registry` 供 pnpm 使用）；
+  单个插件操作请用 `--plugin-registry`，不要混用。
+
 ### 从 GitHub Release 安装（.tgz 资产）
 
 `--plugin-add` 也接受 http(s) URL，DSH 会原样交给 pnpm 按远程 tarball 安装：

@@ -111,6 +111,7 @@ bash dshctl.sh --purge -y         # 完全卸载（自动备份 ~/.dsh 后清理
 | 插件 | `--plugin-list` / `--plugin-add` / `--plugin-remove` / `--plugin-update` / `--plugin-why` | profile 级插件管理（默认 `web`，可 `--profile`） |
 | 插件策略 | `--plugin-repair` `--plugin-policy` `--plugin-policy-set N` `--plugin-policy-reset` | pnpm `minimumReleaseAge` 拦截排障 |
 | 插件豁免 | `--plugin-exemptions` / `--plugin-allow SPEC` / `--plugin-revoke SPEC` | dsh 0.2.0+ 插件兼容性门禁的豁免管理 |
+| 插件注册表 | `--plugin-registry URL`（别名 `--registry=URL`） | 单次 add/update/repair 指定 npm 源，不写 profile 配置 |
 | 模型 | `--model-show` `--model-check` `--model-fix` `--model-set-base URL` | Base URL 规范检查与修复（0.1.7+ 配置在 profile） |
 | 网关 | `--gateway-heartbeat` / `-set MS` / `-reset` | WebSocket 心跳间隔（默认 4 秒窗口，公网易断连） |
 | 数据 | `--data-backup` `--data-restore FILE` `--data-archive-sessions` `--data-prune` | 备份 / 恢复 / 旧会话归档 / 缓存清理 |

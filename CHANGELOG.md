@@ -5,6 +5,28 @@
 
 > 说明：1.4.0 是本项目首个以开源仓库形式发布的版本，更早的内部迭代历史不再追溯。
 
+## [1.6.5] - 2026-11-24
+
+### 新增
+
+- **`--plugin-registry URL`（别名 `--registry URL` / `--registry=URL`）**：为
+  `--plugin-add` / `--plugin-update` / `--plugin-repair` 指定本次操作的 npm 注册表，
+  透传为 `dsh plugin ... --registry=URL`。用于镜像同步滞后或需要临时走官方源的场景，
+  只影响本次进程，不写入 profile 配置。`--plugin-repair` 仅把注册表传给 `install`
+  步骤，`clean --lockfile` 保持原样。
+- 注册表 URL 做基础校验：仅接受 http(s)、拒绝空白 / 查询串 / 片段，自动去除末尾斜杠；
+  用于其他插件命令或安装模式时直接报错。
+
+### 修复
+
+- **`--npm-mirror` 对 pnpm 不生效**：此前只导出 `npm_config_registry`，而 pnpm 11
+  读取的是 `pnpm_config_registry`（实测 `npm_config_registry` 不会改变 pnpm 的
+  registry 解析）。现在两者同时导出，镜像在 pnpm 侧真正生效。
+
+### 文档
+
+- 帮助、`docs/usage.md`、README 中英文补充插件注册表用法与边界。
+
 ## [1.6.4] - 2026-11-20
 
 ### 修复
